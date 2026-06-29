@@ -6,6 +6,7 @@ import { loadConfig } from "../config/load";
 import { runDoctor } from "./doctor";
 import { printCliError } from "./errors";
 import { runInit } from "./init";
+import { runScanCommand } from "./scan";
 import { getPackageVersion } from "../shared/version";
 
 const program = new Command();
@@ -31,18 +32,14 @@ program.command("doctor").description("Check local environment and project layou
 
 program
   .command("scan [path]")
-  .description("Run a security scan (not implemented yet)")
-  .action(() => {
+  .description("Run a static repo intelligence scan")
+  .action((scanPath?: string) => {
     try {
-      loadConfig();
+      runScanCommand(scanPath);
     } catch (error) {
       printCliError(error);
       process.exitCode = 1;
-      return;
     }
-
-    console.error("swarm scan is not implemented yet.");
-    process.exitCode = 1;
   });
 
 program
