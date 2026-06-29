@@ -76,9 +76,8 @@ def test_run_bridge_writes_empty_findings(tmp_path: Path):
     assert output["status"] == "completed"
     assert output["metrics"]["graph"] == "langgraph"
     assert output["metrics"]["load_input"]["normalized"] is True
-    assert output["metrics"]["recon_stub"]["stackCount"] == 1
-    assert output["metrics"]["specialist_stub"]["agentTypes"] == ["api", "recon"]
-    assert output["metrics"]["verifier_stub"]["verifiedFindingCount"] == 0
+    assert output["metrics"]["recon_agent"]["status"] == "completed"
+    assert output["metrics"]["attack_planner"]["hypothesisCount"] >= 1
 
     written = json.loads(output_path.read_text(encoding="utf-8"))
     assert written["scanId"] == "2026-06-29T12-00-00-000Z"
@@ -119,13 +118,14 @@ def test_run_workflow_executes_all_stages(tmp_path: Path):
 
     assert output["metrics"]["stages"] == [
         "load_input",
-        "recon_stub",
         "plan_retrieval",
         "retrieve_context",
         "grade_context",
         "rewrite_query",
         "finalize_context",
-        "specialist_stub",
+        "recon_agent",
+        "attack_planner",
+        "specialist_agents",
         "verifier_stub",
         "report_stub",
     ]

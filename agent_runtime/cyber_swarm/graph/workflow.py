@@ -6,9 +6,9 @@ from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
 
+from cyber_swarm.graph.agent_nodes import attack_planner_node, recon_agent_node
 from cyber_swarm.graph.nodes import (
     load_input,
-    recon_stub,
     report_stub,
     specialist_stub,
     verifier_stub,
@@ -28,19 +28,19 @@ def build_workflow():
     graph = StateGraph(GraphState)
 
     graph.add_node("load_input", load_input)
-    graph.add_node("recon_stub", recon_stub)
     graph.add_node("plan_retrieval", plan_retrieval_node)
     graph.add_node("retrieve_context", retrieve_context_node)
     graph.add_node("grade_context", grade_context_node)
     graph.add_node("rewrite_query", rewrite_query_node)
     graph.add_node("finalize_context", finalize_context_node)
+    graph.add_node("recon_agent", recon_agent_node)
+    graph.add_node("attack_planner", attack_planner_node)
     graph.add_node("specialist_stub", specialist_stub)
     graph.add_node("verifier_stub", verifier_stub)
     graph.add_node("report_stub", report_stub)
 
     graph.add_edge(START, "load_input")
-    graph.add_edge("load_input", "recon_stub")
-    graph.add_edge("recon_stub", "plan_retrieval")
+    graph.add_edge("load_input", "plan_retrieval")
     graph.add_edge("plan_retrieval", "retrieve_context")
     graph.add_edge("retrieve_context", "grade_context")
     graph.add_conditional_edges(
@@ -52,7 +52,9 @@ def build_workflow():
         },
     )
     graph.add_edge("rewrite_query", "retrieve_context")
-    graph.add_edge("finalize_context", "specialist_stub")
+    graph.add_edge("finalize_context", "recon_agent")
+    graph.add_edge("recon_agent", "attack_planner")
+    graph.add_edge("attack_planner", "specialist_stub")
     graph.add_edge("specialist_stub", "verifier_stub")
     graph.add_edge("verifier_stub", "report_stub")
     graph.add_edge("report_stub", END)
@@ -74,6 +76,7 @@ def run_workflow(scan_report_path: Path, routed_skills_path: Path, output_path: 
             "retrieval_attempts": [],
             "retrieval_iteration": 0,
             "retrieval_sufficient": False,
+            "attack_hypotheses": [],
         }
     )
     output = final_state.get("output")

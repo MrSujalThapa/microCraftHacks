@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -195,19 +196,36 @@ def report_stub(state: GraphState) -> GraphState:
             "graph": "langgraph",
             "stages": [
                 "load_input",
-                "recon_stub",
                 "plan_retrieval",
                 "retrieve_context",
                 "grade_context",
                 "rewrite_query",
                 "finalize_context",
-                "specialist_stub",
+                "recon_agent",
+                "attack_planner",
+                "specialist_agents",
                 "verifier_stub",
                 "report_stub",
             ],
             "retrieval": {
                 "attempts": state.get("retrieval_attempts", []),
                 "selectedContext": serialize_context(state.get("selected_context", [])),
+            },
+            "agents": {
+                "recon": asdict(state["recon_report"]) if state.get("recon_report") else None,
+                "attackPlanner": {
+                    "hypotheses": [
+                        asdict(item) for item in state.get("attack_hypotheses", [])
+                    ],
+                },
+                "specialists": {
+                    "draftFindings": [
+                        asdict(item) for item in state.get("draft_findings", [])
+                    ],
+                    "rejectedDrafts": [
+                        asdict(item) for item in state.get("rejected_findings", [])
+                    ],
+                },
             },
         },
     )

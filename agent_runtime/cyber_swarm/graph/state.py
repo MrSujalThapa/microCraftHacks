@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from cyber_swarm.models.agents import AttackHypothesis, ReconReport
 from cyber_swarm.models.retrieval import RetrievedContext, RetrievalQuery
 from cyber_swarm.models.runtime import RuntimeInput
 from cyber_swarm.rag.normalize import normalize_runtime_input
@@ -28,3 +29,5 @@ class GraphState(TypedDict, total=False):
     retrieval_attempts: list[dict[str, Any]]
     retrieval_iteration: int
     retrieval_sufficient: bool
+    recon_report: ReconReport
+    attack_hypotheses: list[AttackHypothesis]
