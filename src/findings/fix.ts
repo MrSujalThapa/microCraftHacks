@@ -55,7 +55,8 @@ export function formatFixPlan(
   evidencePacks: import("./types").EvidencePack[] | undefined = undefined,
 ): string {
   const strictness = assessEvidenceStrictness(finding);
-  if (!strictness.strict) {
+  const secretWithEnvEvidence = hasSecretExposureEvidence(finding);
+  if (!strictness.strict && !secretWithEnvEvidence) {
     return formatFixRefusal(finding.id, strictness.reasons);
   }
 
@@ -143,16 +144,11 @@ function buildConcreteChanges(
   template: FixTemplate | undefined,
   evidencePacks: import("./types").EvidencePack[] | undefined,
 ): string[] {
-  const changes: string[] = [];
-
   if (finding.vulnerability_class === "secret-exposure") {
-    for (const file of finding.affected_files) {
-      changes.push(`Remove committed secret values from ${file} and purge from git history if tracked.`);
-      changes.push(`Rotate any exposed credentials referenced in ${file}.`);
-      changes.push(`Keep ${file} local only and ensure it is listed in .gitignore.`);
-      changes.push("Maintain .env.example with placeholder values such as API_KEY=<REDACTED_SECRET>.");
-    }
+    return buildSecretRemediationChanges(finding);
   }
+
+  const changes: string[] = [];
 
   for (const item of finding.evidence) {
     if (!item.path) {
@@ -179,6 +175,103 @@ function buildConcreteChanges(
   }
 
   return changes;
+}
+
+function buildSecretRemediationChanges(finding: VerifiedFinding): string[] {
+  const envFiles = collectSecretEnvFiles(finding);
+  const keyNames = collectSecretKeyNames(finding);
+  const changes: string[] = [];
+
+  for (const file of envFiles) {
+    changes.push(`Remove committed secret values from ${file} and purge the file from git history if tracked.`);
+    if (keyNames.length > 0) {
+      for (const keyName of keyNames) {
+        changes.push(`Rotate the exposed ${keyName} at the provider; treat the committed value as compromised.`);
+      }
+    } else {
+      changes.push(`Rotate any exposed credentials referenced in ${file}.`);
+    }
+    changes.push(`Ensure ${file} is listed in .gitignore and never committed again.`);
+    changes.push(`Keep ${envExamplePath(file)} with placeholder values only (for example ${placeholderKey(keyNames)}=<REDACTED_SECRET>).`);
+    changes.push(`Load live values from runtime environment variables or a secret manager instead of ${file}.`);
+  }
+
+  if (changes.length === 0) {
+    changes.push("Remove committed secret values from tracked configuration files and purge from git history.");
+    changes.push("Rotate any exposed credentials at the provider.");
+    changes.push("Ensure .env and other secret files are listed in .gitignore.");
+    changes.push("Keep .env.example with placeholder values only.");
+    changes.push("Load credentials from runtime environment variables or a secret manager.");
+  }
+
+  return changes;
+}
+
+function collectSecretEnvFiles(finding: VerifiedFinding): string[] {
+  const files = new Set<string>();
+  for (const file of finding.affected_files) {
+    if (isEnvLikePath(file)) {
+      files.add(file);
+    }
+  }
+  for (const item of finding.evidence) {
+    if (item.path && isEnvLikePath(item.path)) {
+      files.add(item.path);
+    }
+  }
+  return [...files];
+}
+
+function collectSecretKeyNames(finding: VerifiedFinding): string[] {
+  const keys = new Set<string>();
+  const keyPattern =
+    /\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE[_-]?KEY))\b/g;
+
+  for (const item of finding.evidence) {
+    if (item.symbol && !item.symbol.startsWith("NEXT_PUBLIC_")) {
+      keys.add(item.symbol);
+    }
+    for (const source of [item.explanation, item.snippet, finding.claim]) {
+      if (!source) {
+        continue;
+      }
+      for (const match of source.matchAll(keyPattern)) {
+        keys.add(match[1]!);
+      }
+    }
+  }
+
+  return [...keys];
+}
+
+function isEnvLikePath(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/").toLowerCase();
+  return normalized.includes(".env") || normalized.endsWith(".env");
+}
+
+function envExamplePath(envPath: string): string {
+  const normalized = envPath.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  const fileName = parts.pop() ?? ".env";
+  if (fileName.startsWith(".env.")) {
+    return [...parts, fileName].filter(Boolean).join("/") || fileName;
+  }
+  const directory = parts.join("/");
+  return directory ? `${directory}/.env.example` : ".env.example";
+}
+
+function placeholderKey(keyNames: string[]): string {
+  return keyNames[0] ?? "API_KEY";
+}
+
+function hasSecretExposureEvidence(finding: VerifiedFinding): boolean {
+  if (finding.vulnerability_class !== "secret-exposure") {
+    return false;
+  }
+  return (
+    finding.affected_files.some(isEnvLikePath) ||
+    finding.evidence.some((item) => item.path != null && isEnvLikePath(item.path))
+  );
 }
 
 function collectFixLocations(finding: VerifiedFinding): string[] {

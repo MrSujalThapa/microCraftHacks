@@ -1,7 +1,124 @@
 import type { VerifiedFinding } from "./types";
 
+const PUBLIC_ROUTE_PATHS = new Set(["/", "/health", "/api/health", "/status", "/ping"]);
+
+const GENERIC_AUTH_GAP =
+  /(?:missing|lacks|without|no|not)\s+(?:[\w-]+\s+){0,4}(?:auth(?:entication|orization)?|validation|credentials?|guard|middleware)|unauthenticated|not enforced|not validated|visible auth|visible validation|visible authorization|auth dependency|schema validation|public health|health endpoint|health check|health route|\/health|\/api\/health|\/ping|\/status/i;
+
+const SENSITIVE_INDICATORS =
+  /credential|secret|password|token|api[_-]?key|private[_-]?key|pii|ssn|credit.?card|user.?data|email.?address|database.?url|connection.?string|internal.?infra|stack.?trace|debug.?info|env.?var|service.?role|admin.?key|side.?effect|tool.?call|llm|openai|anthropic|embedding|prompt.?injection|supabase|postgres|redis|aws|stripe/i;
+
+const STATE_CHANGING = /\b(post|put|patch|delete|mutate|write|execute|invoke)\b/i;
+
+const NEGATIVE_AUTH_CONTEXT =
+  /\b(without|missing|lacks|no)\s+(auth(?:entication)?|credentials?|validation)\b/gi;
+
+export interface DemoQualityAssessment {
+  demoReady: boolean;
+  demoReason: string;
+}
+
+function normalizeRoute(route: string): string {
+  let cleaned = route.trim().toLowerCase();
+  if (!cleaned.startsWith("/")) {
+    cleaned = `/${cleaned}`;
+  }
+  const trimmed = cleaned.replace(/\/+$/, "");
+  return trimmed || "/";
+}
+
+function collectRoutes(finding: VerifiedFinding): Set<string> {
+  const routes = new Set<string>();
+  for (const surface of finding.affected_surfaces) {
+    if (surface.trim().startsWith("/")) {
+      routes.add(normalizeRoute(surface));
+    }
+  }
+  for (const item of finding.evidence) {
+    if (item.route) {
+      routes.add(normalizeRoute(item.route));
+    }
+  }
+  return routes;
+}
+
+function findingText(finding: VerifiedFinding): string {
+  const parts = [finding.title, finding.claim, finding.impact_hypothesis];
+  for (const item of finding.evidence) {
+    parts.push(item.explanation);
+    if (item.snippet) {
+      parts.push(item.snippet);
+    }
+  }
+  return parts.filter(Boolean).join(" ");
+}
+
+function exposureText(finding: VerifiedFinding): string {
+  const blob = [findingText(finding), finding.attack_path].filter(Boolean).join(" ");
+  return blob.replace(NEGATIVE_AUTH_CONTEXT, "");
+}
+
+export function isGenericPublicRouteFinding(finding: VerifiedFinding): boolean {
+  const routes = collectRoutes(finding);
+  if (routes.size === 0) {
+    return false;
+  }
+  for (const route of routes) {
+    if (!PUBLIC_ROUTE_PATHS.has(route)) {
+      return false;
+    }
+  }
+
+  const text = findingText(finding);
+  const exposure = exposureText(finding);
+  if (SENSITIVE_INDICATORS.test(exposure)) {
+    return false;
+  }
+  if (STATE_CHANGING.test(text) && !GENERIC_AUTH_GAP.test(finding.claim)) {
+    return false;
+  }
+
+  return GENERIC_AUTH_GAP.test(text);
+}
+
+export function assessDemoQuality(finding: VerifiedFinding): DemoQualityAssessment {
+  if (isGenericPublicRouteFinding(finding)) {
+    return {
+      demoReady: false,
+      demoReason:
+        "Generic public health/root route finding without sensitive exposure or side effects",
+    };
+  }
+
+  if (finding.vulnerability_class === "secret-exposure") {
+    return {
+      demoReady: true,
+      demoReason: "Verified secret exposure with redacted evidence",
+    };
+  }
+
+  if (finding.confidence === "high" && finding.ranking_rationale.total_score >= 0.5) {
+    return {
+      demoReady: true,
+      demoReason: "High-confidence verified finding with strong ranking score",
+    };
+  }
+
+  if (finding.confidence === "high" || finding.confidence === "medium") {
+    return {
+      demoReady: true,
+      demoReason: "Verified finding suitable for live demo",
+    };
+  }
+
+  return {
+    demoReady: false,
+    demoReason: "Verified but lower confidence; review before demo",
+  };
+}
+
 export function isDemoReady(finding: VerifiedFinding): boolean {
-  return finding.demo_ready === true;
+  return assessDemoQuality(finding).demoReady;
 }
 
 export function sortFindingsForDisplay(findings: VerifiedFinding[]): VerifiedFinding[] {

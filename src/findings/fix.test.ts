@@ -110,6 +110,7 @@ describe("formatFixPlan", () => {
           line_end: 1,
           snippet: "SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>",
           evidence_pack_id: "ep-secret",
+          symbol: "SUPABASE_SERVICE_ROLE_KEY",
         },
       ],
       safe_reproduction: {
@@ -126,8 +127,13 @@ describe("formatFixPlan", () => {
     expect(output).toContain("backend/.env");
     expect(output).not.toContain("super-secret");
     expect(output).toContain(".gitignore");
-    expect(output).toContain(".env.example");
+    expect(output).toContain("backend/.env.example");
     expect(output).toContain("Rotate");
+    expect(output).toContain("Remove committed secret values");
+    expect(output).toContain("runtime environment");
+    expect(output).toContain("SUPABASE_SERVICE_ROLE_KEY");
+    expect(output).not.toMatch(/^Patch backend\/\.env/m);
+    expect(output).not.toContain("Patch backend/.env:1");
   });
 
   it("uses access-control validation for broken-access-control class", () => {

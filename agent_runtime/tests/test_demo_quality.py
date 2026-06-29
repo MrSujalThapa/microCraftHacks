@@ -64,6 +64,119 @@ def _scan_report() -> dict:
     }
 
 
+def _visible_auth_health_draft() -> AgentFindingDraft:
+    pack = _health_pack()
+    evidence = evidence_from_pack(
+        pack,
+        explanation=(
+            "health in src/server.ts:1 defines route /api/health without a visible "
+            "auth dependency in the handler signature."
+        ),
+    )
+    return AgentFindingDraft(
+        id="draft-health-auth",
+        title="Route /api/health handler lacks visible auth dependency",
+        vulnerability_class="broken-access-control",
+        claim=(
+            "The health handler in src/server.ts exposes /api/health without a visible "
+            "get_current_user, Depends(auth), or equivalent guard in the static handler definition."
+        ),
+        affected_surfaces=["/api/health"],
+        evidence=[evidence],
+        impact_hypothesis="Missing auth dependency on the handler can allow unauthenticated access to the route.",
+        attack_path="Review src/server.ts:1 for auth dependencies on /api/health.",
+        safe_reproduction=static_reproduction(
+            [
+                "Open src/server.ts:1 and inspect the health handler signature.",
+                "Confirm /api/health does not declare an auth dependency before business logic.",
+            ],
+            "Handler for /api/health lacks visible auth enforcement in static code.",
+        ),
+        confidence="medium",
+        agent_type="auth",
+        specialist="auth-breaker",
+        selected_skills=[],
+        retrieval_trace=[],
+    )
+
+
+def _visible_validation_health_draft() -> AgentFindingDraft:
+    pack = _health_pack()
+    evidence = evidence_from_pack(
+        pack,
+        explanation=(
+            "health in src/server.ts:1 handles /api/health requests and lacks schema validation "
+            "or authorization checks in the static handler definition."
+        ),
+    )
+    return AgentFindingDraft(
+        id="draft-health-validation",
+        title="/api/health handler lacks visible validation in src/server.ts",
+        vulnerability_class="broken-access-control",
+        claim=(
+            "The health handler in src/server.ts processes /api/health requests and "
+            "lacks input validation or authorization checks in the static handler definition."
+        ),
+        affected_surfaces=["/api/health"],
+        evidence=[evidence],
+        impact_hypothesis="Missing validation on the handler can enable abusive or malformed request processing.",
+        attack_path="Review src/server.ts:1 for validation and auth checks on /api/health.",
+        safe_reproduction=static_reproduction(
+            [
+                "Open src/server.ts:1 and inspect the health handler body.",
+                "Confirm /api/health lacks visible schema validation before processing.",
+            ],
+            "Handler for /api/health lacks visible validation in static code.",
+        ),
+        confidence="medium",
+        agent_type="api",
+        specialist="api-abuse",
+        selected_skills=[],
+        retrieval_trace=[],
+    )
+
+
+def test_visible_auth_health_route_is_not_demo_ready():
+    draft = _visible_auth_health_draft()
+    assert is_generic_public_route_finding(draft) is True
+
+
+def test_visible_validation_health_route_is_not_demo_ready():
+    draft = _visible_validation_health_draft()
+    assert is_generic_public_route_finding(draft) is True
+
+
+def test_verify_rejects_visible_auth_health_route_finding():
+    draft = _visible_auth_health_draft()
+    result = verify_draft(
+        draft,
+        _scan_report(),
+        context_paths={"src/server.ts"},
+        evidence_packs=[_health_pack()],
+    )
+    assert result.status == "rejected"
+
+
+def test_verify_rejects_visible_validation_health_route_finding():
+    draft = _visible_validation_health_draft()
+    result = verify_draft(
+        draft,
+        _scan_report(),
+        context_paths={"src/server.ts"},
+        evidence_packs=[_health_pack()],
+    )
+    assert result.status == "rejected"
+
+
+def test_health_route_with_sensitive_exposure_is_not_generic():
+    draft = replace(
+        _visible_auth_health_draft(),
+        title="/api/health exposes SUPABASE_SERVICE_ROLE_KEY in response body",
+        claim="The /api/health handler returns SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET> in JSON.",
+    )
+    assert is_generic_public_route_finding(draft) is False
+
+
 def test_generic_health_route_is_not_demo_ready():
     draft = _health_draft()
     assert is_generic_public_route_finding(draft) is True

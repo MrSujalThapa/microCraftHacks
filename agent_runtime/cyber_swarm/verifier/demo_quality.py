@@ -11,10 +11,13 @@ PUBLIC_ROUTE_PATHS = frozenset({"/", "/health", "/api/health", "/status", "/ping
 
 _GENERIC_AUTH_GAP = re.compile(
     r"(?i)("
-    r"missing auth|lacks auth|without auth|no auth|unauthenticated|"
-    r"missing validation|lacks validation|without validation|no validation|"
-    r"not enforced|not validated|public health|health endpoint|health check|"
-    r"health route|/health|/api/health|/ping|/status"
+    r"(?:missing|lacks|without|no|not)\s+(?:[\w-]+\s+){0,4}"
+    r"(?:auth(?:entication|orization)?|validation|credentials?|guard|middleware)|"
+    r"unauthenticated|not enforced|not validated|"
+    r"visible auth|visible validation|visible authorization|"
+    r"auth dependency|schema validation|"
+    r"public health|health endpoint|health check|health route|"
+    r"/health|/api/health|/ping|/status"
     r")"
 )
 
