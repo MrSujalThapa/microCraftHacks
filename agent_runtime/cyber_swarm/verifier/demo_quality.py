@@ -22,19 +22,25 @@ _GENERIC_AUTH_GAP = re.compile(
     r")"
 )
 
-_SENSITIVE_INDICATORS = re.compile(
-    r"(?i)("
-    r"credential|secret|password|token|api[_-]?key|private[_-]?key|"
-    r"pii|ssn|credit.?card|user.?data|email.?address|"
-    r"database.?url|connection.?string|internal.?infra|stack.?trace|"
-    r"debug.?info|env.?var|service.?role|admin.?key|"
-    r"side.?effect|tool.?call|"
-    r"llm|openai|anthropic|embedding|prompt.?injection|"
-    r"supabase|postgres|redis|aws|stripe"
-    r")"
-)
+from cyber_swarm.evidence.secret_packs import sensitive_exposure_match
 
 _STATE_CHANGING = re.compile(r"(?i)\b(post|put|patch|delete|mutate|write|execute|invoke)\b")
+
+_GET_HANDLER = re.compile(
+    r"(?i)(@app\.get|@router\.get|router\.get\s*\(|\.get\s*\(|methods\s*=\s*\[\s*[\"']GET|async def get_|\bGET /)"
+)
+
+_HANDLER_GAP_TITLE = re.compile(
+    r"(?i)handler lacks visible (auth(?:entication|orization)?|validation|auth dependency)"
+)
+
+_USER_CONTROLLED_INPUT = re.compile(
+    r"(?i)(user[_-]?id|customer[_-]?id|account[_-]?id|owner[_-]?id|/{[^}]+}|path param|"
+    r"query param|request\.body|request body|payload|upload|multipart|form data|"
+    r"create|update|delete|insert|modify)"
+)
+
+_ROUTE_IN_TEXT = re.compile(r"(?i)(/api/[\w-]+|/health\b|/status\b|/ping\b)")
 
 
 def normalize_route(route: str) -> str:
@@ -46,9 +52,6 @@ def normalize_route(route: str) -> str:
 
 def is_public_route(route: str) -> bool:
     return normalize_route(route) in PUBLIC_ROUTE_PATHS
-
-
-_ROUTE_IN_TEXT = re.compile(r"(?i)(/api/health|/health\b|/status\b|/ping\b)")
 
 
 def _routes_from_text(finding: VerifiedFinding | AgentFindingDraft) -> set[str]:
@@ -96,6 +99,41 @@ def _exposure_text(finding: VerifiedFinding | AgentFindingDraft) -> str:
     return negative_auth_context.sub("", blob)
 
 
+def _is_readonly_get_handler(finding: VerifiedFinding | AgentFindingDraft) -> bool:
+    text = _finding_text(finding)
+    if _GET_HANDLER.search(text):
+        return True
+    if _HANDLER_GAP_TITLE.search(finding.title):
+        return True
+    for item in finding.evidence:
+        snippet = item.snippet or ""
+        if _GET_HANDLER.search(snippet):
+            return True
+        if item.route and _GENERIC_AUTH_GAP.search(item.explanation or ""):
+            return True
+    return False
+
+
+def is_generic_readonly_get_finding(finding: VerifiedFinding | AgentFindingDraft) -> bool:
+    if finding.vulnerability_class == "secret-exposure":
+        return False
+
+    text = _finding_text(finding)
+    if not _GENERIC_AUTH_GAP.search(text):
+        return False
+    if not _is_readonly_get_handler(finding):
+        return False
+
+    exposure = _exposure_text(finding)
+    if sensitive_exposure_match(exposure):
+        return False
+    if _STATE_CHANGING.search(text) and not _GENERIC_AUTH_GAP.search(finding.claim):
+        return False
+    if _USER_CONTROLLED_INPUT.search(text):
+        return False
+    return True
+
+
 def is_generic_public_route_finding(finding: VerifiedFinding | AgentFindingDraft) -> bool:
     routes = _collect_routes(finding)
     if not routes:
@@ -105,7 +143,7 @@ def is_generic_public_route_finding(finding: VerifiedFinding | AgentFindingDraft
 
     text = _finding_text(finding)
     exposure = _exposure_text(finding)
-    if _SENSITIVE_INDICATORS.search(exposure):
+    if sensitive_exposure_match(exposure):
         return False
     if _STATE_CHANGING.search(text) and not _GENERIC_AUTH_GAP.search(finding.claim):
         return False
@@ -113,22 +151,19 @@ def is_generic_public_route_finding(finding: VerifiedFinding | AgentFindingDraft
     return _GENERIC_AUTH_GAP.search(text) is not None
 
 
+def is_generic_demo_noise_finding(finding: VerifiedFinding | AgentFindingDraft) -> bool:
+    return is_generic_public_route_finding(finding) or is_generic_readonly_get_finding(finding)
+
+
 def assess_demo_quality(finding: VerifiedFinding) -> tuple[bool, str]:
-    if is_generic_public_route_finding(finding):
+    if is_generic_demo_noise_finding(finding):
         return (
             False,
-            "Generic public health/root route finding without sensitive exposure or side effects",
+            "Generic read-only route finding without sensitive exposure, user input, or side effects",
         )
 
     if finding.vulnerability_class == "secret-exposure":
         return True, "Verified secret exposure with redacted evidence"
-
-    routes = _collect_routes(finding)
-    if routes and routes.issubset(PUBLIC_ROUTE_PATHS) and _GENERIC_AUTH_GAP.search(_finding_text(finding)):
-        return (
-            False,
-            "Public health/root route finding without sensitive exposure or side effects",
-        )
 
     if finding.confidence == "high" and finding.ranking_rationale.total_score >= 0.5:
         return True, "High-confidence verified finding with strong ranking score"
@@ -148,5 +183,9 @@ def public_route_verification_failures(draft: AgentFindingDraft) -> list[str]:
     if is_generic_public_route_finding(draft):
         return [
             "generic public health/root route finding without sensitive data, credentials, or side effects"
+        ]
+    if is_generic_readonly_get_finding(draft):
+        return [
+            "generic read-only GET route finding without sensitive exposure, user input, or side effects"
         ]
     return []

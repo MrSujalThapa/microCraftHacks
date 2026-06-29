@@ -11,6 +11,7 @@ from cyber_swarm.models.agents import AgentFindingDraft, RankingRationale, Verif
 from cyber_swarm.verifier.demo_quality import (
     assess_demo_quality,
     is_generic_public_route_finding,
+    is_generic_readonly_get_finding,
     public_route_verification_failures,
 )
 from cyber_swarm.verifier.verify import verify_draft
@@ -195,6 +196,83 @@ def test_verify_rejects_generic_health_route_finding():
     assert result.rejected is not None
     checks = " ".join(result.rejected.failed_checks).lower()
     assert "public health" in checks or "health/root" in checks
+
+
+def _zones_validation_draft() -> AgentFindingDraft:
+    pack = EvidencePack(
+        id="ep-zones",
+        path="backend/app/main.py",
+        line_start=42,
+        line_end=48,
+        snippet="@app.get('/api/zones')\nasync def list_zones():\n    return {'zones': []}",
+        symbol="list_zones",
+        surface_type="api",
+        kind="route_handler",
+        route="/api/zones",
+    )
+    evidence = evidence_from_pack(
+        pack,
+        explanation=(
+            "list_zones in backend/app/main.py:42 handles /api/zones requests and lacks schema validation "
+            "or authorization checks in the static handler definition."
+        ),
+    )
+    return AgentFindingDraft(
+        id="draft-zones-validation",
+        title="/api/zones handler lacks visible validation in backend/app/main.py",
+        vulnerability_class="broken-access-control",
+        claim=(
+            "The list_zones handler in backend/app/main.py processes /api/zones requests and "
+            "lacks input validation or authorization checks in the static handler definition."
+        ),
+        affected_surfaces=["/api/zones"],
+        evidence=[evidence],
+        impact_hypothesis="Missing validation on the handler can enable abusive or malformed request processing.",
+        attack_path="Review backend/app/main.py:42 for validation and auth checks on /api/zones.",
+        safe_reproduction=static_reproduction(
+            [
+                "Open backend/app/main.py:42 and inspect the list_zones handler body.",
+                "Confirm /api/zones lacks visible schema validation before processing.",
+            ],
+            "Handler for /api/zones lacks visible validation in static code.",
+        ),
+        confidence="high",
+        agent_type="api",
+        specialist="api-abuse",
+        selected_skills=[],
+        retrieval_trace=[],
+    )
+
+
+def test_zones_readonly_get_validation_is_not_demo_ready():
+    draft = _zones_validation_draft()
+    assert is_generic_readonly_get_finding(draft) is True
+    assert public_route_verification_failures(draft)
+
+
+def test_verify_rejects_zones_readonly_get_validation():
+    draft = _zones_validation_draft()
+    zones_pack = EvidencePack(
+        id="ep-zones",
+        path="backend/app/main.py",
+        line_start=42,
+        line_end=48,
+        snippet="@app.get('/api/zones')\nasync def list_zones():\n    return {'zones': []}",
+        symbol="list_zones",
+        surface_type="api",
+        kind="route_handler",
+        route="/api/zones",
+    )
+    result = verify_draft(
+        draft,
+        {
+            "inventory": {"files": [{"path": "backend/app/main.py", "category": "python"}]},
+            "surfaces": {"api": [{"path": "/api/zones", "file": "backend/app/main.py"}]},
+        },
+        context_paths={"backend/app/main.py"},
+        evidence_packs=[zones_pack],
+    )
+    assert result.status == "rejected"
 
 
 def test_secret_finding_assessment_is_demo_ready():

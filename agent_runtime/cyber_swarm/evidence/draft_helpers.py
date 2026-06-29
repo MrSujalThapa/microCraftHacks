@@ -9,6 +9,7 @@ from cyber_swarm.agents.shared import (
 )
 from cyber_swarm.evidence.refs import evidence_from_pack
 from cyber_swarm.evidence.models import EvidencePack
+from cyber_swarm.evidence.secret_packs import is_secret_evidence_pack
 from cyber_swarm.models.agents import AgentFindingDraft, AttackHypothesis
 from cyber_swarm.models.retrieval import RetrievedContext
 from cyber_swarm.models.runtime import RuntimeInput
@@ -206,37 +207,23 @@ def build_api_abuse_draft(
     )
 
 
-def build_secrets_draft(
-    hypothesis: AttackHypothesis,
+def _secret_draft_from_pack(
+    pack: EvidencePack,
     runtime_input: RuntimeInput,
-    evidence_packs: list[EvidencePack],
     selected_context: list[RetrievedContext],
-) -> AgentFindingDraft | None:
-    packs = _packs_for_hypothesis(evidence_packs, hypothesis, surface_types={"config", "auth", "dependency"})
-    secret_packs = [
-        pack
-        for pack in packs
-        if (
-            pack.kind == "env_key"
-            and pack.symbol
-            and not pack.symbol.startswith("NEXT_PUBLIC_")
-            and any(token in pack.symbol.upper() for token in ("KEY", "SECRET", "TOKEN", "PASSWORD"))
-        )
-        or file_contains_secret_pattern(pack.path, pack.snippet)
-    ]
-    if not secret_packs:
-        return None
-
-    pack = secret_packs[0]
+    *,
+    draft_id: str,
+    vulnerability_class: str = "secret-exposure",
+) -> AgentFindingDraft:
     key_name = pack.symbol or "credential key"
     explanation = (
         f"{key_name} appears in {pack.path}:{pack.line_start} with a credential-like assignment "
         "that should not contain live secrets in the repository."
     )
     return AgentFindingDraft(
-        id=f"draft-{hypothesis.id}",
+        id=draft_id,
         title=f"Hardcoded {key_name} in {pack.path}",
-        vulnerability_class=hypothesis.vulnerability_class,
+        vulnerability_class=vulnerability_class,
         claim=(
             f"{key_name} in {pack.path}:{pack.line_start} is assigned in tracked configuration "
             "without using a secret manager or runtime-only environment injection."
@@ -252,9 +239,57 @@ def build_secrets_draft(
             ],
             f"{key_name} assignment is visible in static configuration at {pack.path}:{pack.line_start}.",
         ),
-        confidence="high" if len(secret_packs) > 1 else "medium",
+        confidence="high",
         agent_type="secrets",
         specialist="secrets-config",
         selected_skills=skills_for_agent(runtime_input, "secrets"),
         retrieval_trace=[item.id for item in selected_context[:3]],
+    )
+
+
+def build_deterministic_secret_drafts(
+    runtime_input: RuntimeInput,
+    evidence_packs: list[EvidencePack],
+    selected_context: list[RetrievedContext],
+) -> list[AgentFindingDraft]:
+    """Build secret exposure drafts from env-key evidence packs without LLM involvement."""
+    drafts: list[AgentFindingDraft] = []
+    seen: set[tuple[str, str, int]] = set()
+
+    for index, pack in enumerate(evidence_packs, start=1):
+        if not is_secret_evidence_pack(pack):
+            continue
+        dedupe_key = (pack.path, pack.symbol or "", pack.line_start)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        drafts.append(
+            _secret_draft_from_pack(
+                pack,
+                runtime_input,
+                selected_context,
+                draft_id=f"draft-det-secret-{index}",
+            )
+        )
+
+    return drafts
+
+
+def build_secrets_draft(
+    hypothesis: AttackHypothesis,
+    runtime_input: RuntimeInput,
+    evidence_packs: list[EvidencePack],
+    selected_context: list[RetrievedContext],
+) -> AgentFindingDraft | None:
+    packs = _packs_for_hypothesis(evidence_packs, hypothesis, surface_types={"config", "auth", "dependency"})
+    secret_packs = [pack for pack in packs if is_secret_evidence_pack(pack)]
+    if not secret_packs:
+        return None
+
+    return _secret_draft_from_pack(
+        secret_packs[0],
+        runtime_input,
+        selected_context,
+        draft_id=f"draft-{hypothesis.id}",
+        vulnerability_class=hypothesis.vulnerability_class,
     )

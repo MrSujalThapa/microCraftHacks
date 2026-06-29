@@ -6,7 +6,9 @@ import {
   assessDemoQuality,
   filterDemoFindings,
   isDemoReady,
+  isGenericDemoNoiseFinding,
   isGenericPublicRouteFinding,
+  isGenericReadonlyGetFinding,
 } from "./demoQuality";
 import { formatFindingsTable } from "./display";
 
@@ -79,12 +81,46 @@ function healthValidationFinding(overrides: Partial<VerifiedFinding> = {}): Veri
 }
 
 describe("isGenericPublicRouteFinding", () => {
-  it("treats /api/health lacks auth as generic public route noise", () => {
-    expect(isGenericPublicRouteFinding(healthAuthFinding())).toBe(true);
+  it("treats /api/health lacks auth as generic demo noise", () => {
+    expect(isGenericDemoNoiseFinding(healthAuthFinding())).toBe(true);
   });
 
-  it("treats /api/health lacks validation as generic public route noise", () => {
-    expect(isGenericPublicRouteFinding(healthValidationFinding())).toBe(true);
+  it("treats /api/health lacks validation as generic demo noise", () => {
+    expect(isGenericDemoNoiseFinding(healthValidationFinding())).toBe(true);
+  });
+
+  it("treats /api/zones readonly GET validation as generic demo noise", () => {
+    const base = sampleFindingsReport().verifiedFindings[0]!;
+    const finding: VerifiedFinding = {
+      ...base,
+      id: "verified-zones-validation",
+      title: "/api/zones handler lacks visible validation in backend/app/main.py",
+      vulnerability_class: "broken-access-control",
+      claim:
+        "The list_zones handler in backend/app/main.py processes /api/zones requests and lacks input validation.",
+      affected_surfaces: ["/api/zones"],
+      affected_files: ["backend/app/main.py"],
+      evidence: [
+        {
+          type: "file",
+          explanation:
+            "list_zones in backend/app/main.py:42 handles /api/zones requests and lacks schema validation.",
+          path: "backend/app/main.py",
+          route: "/api/zones",
+          line_start: 42,
+          line_end: 48,
+          snippet: "@app.get('/api/zones')\nasync def list_zones():\n    return {'zones': []}",
+          evidence_pack_id: "ep-zones",
+          symbol: "list_zones",
+        },
+      ],
+      confidence: "high",
+      ranking_rationale: { ...base.ranking_rationale, total_score: 0.82 },
+      demo_ready: true,
+    };
+
+    expect(isGenericReadonlyGetFinding(finding)).toBe(true);
+    expect(isDemoReady(finding)).toBe(false);
   });
 
   it("allows health route findings with sensitive exposure", () => {
@@ -257,6 +293,30 @@ describe("wattif report shapes", () => {
   });
 
   it("findings --demo keeps only verified-draft-h1 for wattif report shape", () => {
+    const base = sampleFindingsReport().verifiedFindings[0]!;
+    const zonesFinding: VerifiedFinding = {
+      ...base,
+      id: "verified-zones-validation",
+      title: "/api/zones handler lacks visible validation in backend/app/main.py",
+      vulnerability_class: "broken-access-control",
+      claim: "/api/zones handler lacks visible validation in backend/app/main.py",
+      affected_surfaces: [],
+      affected_files: ["backend/app/main.py"],
+      evidence: [
+        {
+          type: "file",
+          explanation: "/api/zones handler lacks visible validation in backend/app/main.py",
+          path: "backend/app/main.py",
+          line_start: 42,
+          snippet: "@app.get('/api/zones')\nasync def list_zones(): pass",
+          evidence_pack_id: "ep-zones",
+        },
+      ],
+      confidence: "high",
+      ranking_rationale: { ...base.ranking_rationale, total_score: 0.82 },
+      demo_ready: true,
+    };
+
     const report = {
       ...sampleFindingsReport(),
       verifiedFindings: [
@@ -268,6 +328,7 @@ describe("wattif report shapes", () => {
           "verified-draft-validation-health",
           "/api/health handler lacks visible validation in backend/app/routes/health.py",
         ),
+        zonesFinding,
         wattifSecretFinding(),
       ],
       metrics: {
@@ -284,7 +345,8 @@ describe("wattif report shapes", () => {
     expect(output).not.toContain("verified-draft-auth-health");
     expect(output).not.toContain("verified-draft-validation-health");
     expect(output).not.toContain("lacks visible auth");
-    expect(output).not.toContain("lacks visible validation");
+    expect(output).not.toContain("verified-zones-validation");
+    expect(output).not.toContain("/api/zones");
   });
 });
 

@@ -14,6 +14,39 @@ from cyber_swarm.verifier.ranking import rank_verified_findings, severity_counts
 from cyber_swarm.verifier.verify import verify_drafts
 
 
+def _cap_demo_ready_findings(findings, *, max_demo: int):
+    from dataclasses import replace
+
+    demo_ready = [item for item in findings if item.demo_ready]
+    if len(demo_ready) <= max_demo:
+        return findings
+
+    keep_ids = {
+        item.id
+        for item in sorted(
+            demo_ready,
+            key=lambda finding: (
+                0 if finding.vulnerability_class == "secret-exposure" else 1,
+                -finding.ranking_rationale.total_score,
+                finding.title,
+            ),
+        )[:max_demo]
+    }
+    capped: list = []
+    for item in findings:
+        if item.demo_ready and item.id not in keep_ids:
+            capped.append(
+                replace(
+                    item,
+                    demo_ready=False,
+                    demo_reason="Demo mode prioritizes higher-signal findings over generic API noise",
+                )
+            )
+        else:
+            capped.append(item)
+    return capped
+
+
 def _merge_metrics(state: GraphState, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
     metrics = dict(state.get("metrics", {}))
     metrics[stage] = payload
@@ -131,8 +164,12 @@ def rank_node(state: GraphState) -> GraphState:
     ]
     ranked = rank_verified_findings(verified)
     annotated = [annotate_demo_quality(item) for item in ranked]
+    runtime_config = state.get("runtime_config")
+    if isinstance(runtime_config, RuntimeConfig) and runtime_config.is_demo:
+        annotated = _cap_demo_ready_findings(annotated, max_demo=2)
     annotated.sort(
         key=lambda item: (
+            0 if item.vulnerability_class == "secret-exposure" else 1,
             0 if item.demo_ready else 1,
             -_SEVERITY_ORDER[item.severity],
             -item.ranking_rationale.total_score,

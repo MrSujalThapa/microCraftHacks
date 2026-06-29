@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cyber_swarm.evidence.prompt import format_packs_for_prompt
+from cyber_swarm.evidence.secret_packs import is_secret_evidence_pack
 from cyber_swarm.evidence.packs import build_evidence_packs
 from cyber_swarm.graph.state import GraphState
 from cyber_swarm.models.runtime_config import RuntimeConfig
@@ -56,6 +57,9 @@ def build_evidence_packs_node(state: GraphState) -> GraphState:
             for pack in packs
             if not (pack.route and is_public_route(pack.route))
         ]
+        secret_packs = [pack for pack in packs if is_secret_evidence_pack(pack)]
+        other_packs = [pack for pack in packs if pack not in secret_packs]
+        packs = (secret_packs + other_packs)[:max_packs]
 
     return {
         **state,

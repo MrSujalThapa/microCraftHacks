@@ -12,8 +12,16 @@ from cyber_swarm.agents.model_stages import (
 )
 from cyber_swarm.agents.recon import run_recon
 from cyber_swarm.agents.specialists.runner import run_specialists
+from cyber_swarm.evidence.draft_helpers import build_deterministic_secret_drafts
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.models.agents import AgentFindingDraft
 from cyber_swarm.models.runtime_config import RuntimeConfig
+
+_DEMO_SPECIALIST_PRIORITY = {
+    "secrets-config": 0,
+    "auth-breaker": 1,
+    "api-abuse": 2,
+}
 
 
 def _merge_metrics(state: GraphState, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -39,6 +47,67 @@ def _runtime_config(state: GraphState) -> RuntimeConfig:
 def _provider_metrics(state: GraphState) -> dict[str, Any]:
     metrics = dict(state.get("provider_metrics", {}))
     return metrics
+
+
+def _sort_hypotheses_for_demo(
+    hypotheses: list,
+    runtime_config: RuntimeConfig,
+) -> list:
+    if not runtime_config.is_demo:
+        return hypotheses
+    return sorted(
+        hypotheses,
+        key=lambda item: (_DEMO_SPECIALIST_PRIORITY.get(item.specialist, 99), item.id),
+    )
+
+
+def _prioritize_drafts_for_demo(
+    drafts: list[AgentFindingDraft],
+    runtime_config: RuntimeConfig,
+) -> list[AgentFindingDraft]:
+    if not runtime_config.is_demo:
+        return drafts
+
+    def sort_key(draft: AgentFindingDraft) -> tuple[int, str]:
+        if draft.vulnerability_class == "secret-exposure":
+            return (0, draft.id)
+        if draft.specialist == "auth-breaker":
+            return (1, draft.id)
+        return (2, draft.id)
+
+    return sorted(drafts, key=sort_key)
+
+
+def _draft_file_key(draft: AgentFindingDraft) -> str:
+    for item in draft.evidence:
+        if item.path:
+            return item.path
+    return draft.id
+
+
+def _merge_secret_drafts(
+    deterministic: list[AgentFindingDraft],
+    specialist_drafts: list[AgentFindingDraft],
+) -> list[AgentFindingDraft]:
+    merged: list[AgentFindingDraft] = []
+    seen_files: set[str] = set()
+
+    for draft in deterministic:
+        file_key = _draft_file_key(draft)
+        if file_key in seen_files:
+            continue
+        seen_files.add(file_key)
+        merged.append(draft)
+
+    for draft in specialist_drafts:
+        if draft.vulnerability_class == "secret-exposure":
+            file_key = _draft_file_key(draft)
+            if file_key in seen_files:
+                continue
+            seen_files.add(file_key)
+        merged.append(draft)
+
+    return merged
 
 
 def recon_agent_node(state: GraphState) -> GraphState:
@@ -109,6 +178,8 @@ def attack_planner_node(state: GraphState) -> GraphState:
     else:
         hypotheses = run_attack_planner(runtime_input, recon, selected_context)[:max_hypotheses]
 
+    hypotheses = _sort_hypotheses_for_demo(hypotheses, runtime_config)
+
     return {
         **state,
         "attack_hypotheses": hypotheses,
@@ -132,7 +203,17 @@ def specialist_agents_node(state: GraphState) -> GraphState:
     runtime_config = _runtime_config(state)
     from cyber_swarm.agents.specialists.runner import SPECIALISTS
 
+    evidence_packs = state.get("evidence_packs", [])
+    selected_context = state.get("selected_context", [])
+
+    deterministic_secrets = build_deterministic_secret_drafts(
+        runtime_input,
+        evidence_packs,
+        selected_context,
+    )
+
     max_specialists = runtime_config.effective_max_specialists()
+    hypotheses = _sort_hypotheses_for_demo(hypotheses, runtime_config)
     hypotheses = hypotheses[:max_specialists]
 
     invoked_specialists = sorted(
@@ -145,9 +226,11 @@ def specialist_agents_node(state: GraphState) -> GraphState:
     drafts, rejected = run_specialists(
         runtime_input,
         hypotheses,
-        state.get("selected_context", []),
-        state.get("evidence_packs", []),
+        selected_context,
+        evidence_packs,
     )
+    drafts = _merge_secret_drafts(deterministic_secrets, drafts)
+    drafts = _prioritize_drafts_for_demo(drafts, runtime_config)
     drafts = drafts[: runtime_config.effective_max_draft_findings()]
 
     return {
@@ -161,6 +244,7 @@ def specialist_agents_node(state: GraphState) -> GraphState:
                 "status": "completed",
                 "draftFindingCount": len(drafts),
                 "rejectedDraftCount": len(rejected),
+                "deterministicSecretDraftCount": len(deterministic_secrets),
                 "specialists": sorted({draft.specialist for draft in drafts}),
                 "agentsRun": len(invoked_specialists),
                 "invokedSpecialists": invoked_specialists,
