@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { createDefaultConfig } from "./defaults";
@@ -27,7 +27,11 @@ export function initProject(root = process.cwd()): InitResult {
   let config: SwarmConfig;
 
   if (configExists) {
-    config = loadConfig(root);
+    try {
+      config = loadConfig(root);
+    } catch {
+      config = createDefaultConfig(root);
+    }
   } else {
     mkdirSync(dirname(configPath), { recursive: true });
     config = createDefaultConfig(root);
@@ -42,13 +46,4 @@ export function initProject(root = process.cwd()): InitResult {
     configCreated,
     directoriesCreated,
   };
-}
-
-export function readConfigFile(root = process.cwd()): SwarmConfig | null {
-  const configPath = getConfigPath(root);
-  if (!existsSync(configPath)) {
-    return null;
-  }
-
-  return JSON.parse(readFileSync(configPath, "utf8")) as SwarmConfig;
 }
