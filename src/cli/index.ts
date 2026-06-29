@@ -6,6 +6,7 @@ import { runDoctor } from "./doctor";
 import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
+import { runAgentsRunCommand } from "./agents";
 import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
@@ -75,6 +76,20 @@ skillsCommand
   .requiredOption("--report <path>", "Path to scan report JSON")
   .action((options: { report: string }) => {
     runSkillsCommand(() => runSkillsRouteCommand(options.report));
+  });
+
+const agentsCommand = program
+  .command("agents")
+  .description("Run Python LangGraph agent runtime");
+
+agentsCommand
+  .command("run")
+  .description("Run agent runtime against scan and routed skill artifacts")
+  .requiredOption("--report <path>", "Path to scan report JSON")
+  .option("--routed-skills <path>", "Path to routed skills JSON")
+  .option("--output <path>", "Path to write findings output JSON")
+  .action((options: { report: string; routedSkills?: string; output?: string }) => {
+    runAgentsRunCommand(options);
   });
 
 program.parse(process.argv);
