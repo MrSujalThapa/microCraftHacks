@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../config/defaults";
 import type { ScanReport } from "../scanner/types";
 import { buildSkillsIndex } from "./indexer";
-import { routeSkills, routeSkillsFromReport } from "./router";
+import { collectRepoEvidence, routeSkills, routeSkillsFromReport, scoreSkill } from "./router";
 import type { SkillIndexEntry } from "./types";
 
 const tempRoots: string[] = [];
@@ -33,10 +33,116 @@ Full body for ${name}
   );
 }
 
+function tsCliReport(root: string): ScanReport {
+  return {
+    version: "0.1.0",
+    scannedAt: "2026-06-29T00:00:00.000Z",
+    projectRoot: root,
+    inventory: {
+      totalFiles: 6,
+      byCategory: { typescript: 4, config: 2 },
+      files: [
+        { path: "src/cli/index.ts", category: "typescript" },
+        { path: "src/config/auth.ts", category: "typescript" },
+        { path: "src/skills/router.ts", category: "typescript" },
+        { path: "package.json", category: "config" },
+        { path: "tsconfig.json", category: "config" },
+        { path: ".env", category: "config" },
+      ],
+    },
+    stack: [{ name: "TypeScript", confidence: "high", evidence: ["package.json", "tsconfig.json"] }],
+    surfaces: {
+      routes: [{ path: "/health", file: "src/cli/index.ts", framework: "express" }],
+      api: [
+        { path: "/api/login", file: "src/config/auth.ts", framework: "express" },
+        { path: "/api/orders", file: "src/api/orders.ts", framework: "express" },
+      ],
+      auth: [{ file: "src/config/auth.ts", type: "middleware" }],
+      dataModels: [],
+    },
+  };
+}
+
+function irrelevantSkills(): SkillIndexEntry[] {
+  return [
+    {
+      name: "post-exploiting-microsoft-graph-with-graphrunner",
+      description: "Microsoft Graph post exploitation",
+      tags: ["graph", "microsoft-graph", "oauth"],
+      path: "skills/external/graph/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "auditing-kubernetes-rbac-privilege-escalation",
+      description: "Kubernetes RBAC escalation review",
+      tags: ["kubernetes", "rbac", "cloud"],
+      path: "skills/external/k8s/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "auditing-uefi-firmware-with-chipsec",
+      description: "UEFI firmware audit",
+      tags: ["firmware", "uefi", "chipsec"],
+      path: "skills/external/firmware/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "building-phishing-reporting-button-workflow",
+      description: "Phishing reporting workflow",
+      tags: ["phishing", "email", "workflow"],
+      path: "skills/external/phishing/SKILL.md",
+      sourceType: "external",
+    },
+  ];
+}
+
+function relevantSkills(): SkillIndexEntry[] {
+  return [
+    {
+      name: "testing-api-for-broken-object-level-authorization",
+      description: "Test API routes for broken object level authorization",
+      tags: ["api", "authorization", "owasp"],
+      path: "skills/external/api-bola/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "detecting-hardcoded-secrets-in-config",
+      description: "Find secrets in env and config files",
+      tags: ["secret", "credential", "env"],
+      path: "skills/external/secrets/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "reviewing-auth-middleware-coverage",
+      description: "Review login and auth middleware coverage",
+      tags: ["auth", "authentication", "access-control", "login"],
+      path: "skills/external/auth/SKILL.md",
+      sourceType: "external",
+    },
+  ];
+}
+
 afterEach(() => {
   while (tempRoots.length > 0) {
     rmSync(tempRoots.pop()!, { recursive: true, force: true });
   }
+});
+
+describe("collectRepoEvidence", () => {
+  it("ignores vendored skills paths when collecting keywords", () => {
+    const report = tsCliReport("/tmp/project");
+    report.inventory.files.push({
+      path: "skills/external/Anthropic-Cybersecurity-Skills/skills/auditing-kubernetes-rbac-privilege-escalation/SKILL.md",
+      category: "markdown",
+    });
+
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.detectedDomains.has("kubernetes")).toBe(false);
+    expect(evidence.keywords.has("kubernetes")).toBe(false);
+    expect(evidence.hasApiSurfaces).toBe(true);
+    expect(evidence.hasAuthSurfaces).toBe(true);
+  });
 });
 
 describe("routeSkills", () => {
@@ -92,7 +198,47 @@ describe("routeSkills", () => {
     expect(selected.map((s) => s.name)).toContain("detecting-broken-access-control");
     expect(selected.map((s) => s.name)).not.toContain("unrelated-skill");
     expect(selected[0].reasons.length).toBeGreaterThan(0);
+    expect(selected[0].reasons[0]).toMatch(/route:|auth surface:|stack:|source file:/);
     expect(selected[0].agentTypes).toContain("auth");
+  });
+
+  it("excludes irrelevant cloud, firmware, and phishing skills for a TS CLI repo", () => {
+    const report = tsCliReport("/tmp/project");
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...irrelevantSkills()] });
+    const names = selected.map((skill) => skill.name);
+
+    expect(names).toContain("reviewing-auth-middleware-coverage");
+    expect(names).toContain("testing-api-for-broken-object-level-authorization");
+    expect(names).not.toContain("post-exploiting-microsoft-graph-with-graphrunner");
+    expect(names).not.toContain("auditing-kubernetes-rbac-privilege-escalation");
+    expect(names).not.toContain("auditing-uefi-firmware-with-chipsec");
+    expect(names).not.toContain("building-phishing-reporting-button-workflow");
+  });
+
+  it("does not route a skill based only on its own name tokens", () => {
+    const report = tsCliReport("/tmp/project");
+    const evidence = collectRepoEvidence(report);
+    const selection = scoreSkill(
+      {
+        name: "implementing-continuous-security-validation-with-bas",
+        description: "Generic security validation",
+        tags: ["security", "validation"],
+        path: "skills/external/bas/SKILL.md",
+        sourceType: "external",
+      },
+      evidence,
+    );
+
+    expect(selection).toBeNull();
+  });
+
+  it("cites concrete repo evidence in route reasons", () => {
+    const report = tsCliReport("/tmp/project");
+    const selected = routeSkills(report, { skills: relevantSkills() });
+    const authSkill = selected.find((skill) => skill.name === "reviewing-auth-middleware-coverage");
+
+    expect(authSkill).toBeDefined();
+    expect(authSkill?.reasons.some((reason) => reason.includes("/api/login"))).toBe(true);
   });
 });
 
@@ -105,7 +251,7 @@ describe("routeSkillsFromReport", () => {
       root,
       "skills/external/Anthropic-Cybersecurity-Skills/skills/auth",
       "auth-check",
-      ["auth", "api"],
+      ["auth", "login"],
     );
     writeSkill(
       root,
