@@ -1,0 +1,25 @@
+{
+  "projectName": "microCraft",
+  "mode": "static",
+  "provider": "openai",
+  "model": "gpt-5-mini",
+  "riskLevel": "passive",
+  "allowedTargets": [
+    {
+      "type": "local"
+    }
+  ],
+  "appCommand": null,
+  "appUrl": null,
+  "skills": {
+    "externalRepo": "https://github.com/mukul975/Anthropic-Cybersecurity-Skills.git",
+    "externalRoot": "skills/external",
+    "localApprovedRoot": "skills/local-approved",
+    "draftRoot": "skills/drafts",
+    "rejectedRoot": "skills/rejected",
+    "lockfile": ".swarm/skills.lock.json",
+    "autoReindex": true
+  },
+  "cacheDir": ".swarm/cache",
+  "outputDir": ".swarm/reports"
+}
