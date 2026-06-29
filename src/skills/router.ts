@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { SwarmConfig } from "../config/types";
+import { shouldIgnoreScannedPath } from "../scanner/ignore";
 import type { ScanReport } from "../scanner/types";
 import { isTestFile } from "../shared/files";
 import { SkillsError } from "./errors";
@@ -112,11 +113,6 @@ const EXCLUDED_INVENTORY_PREFIXES = [
   "skills/external/",
   "skills/drafts/",
   "skills/rejected/",
-  "node_modules/",
-  "__pycache__/",
-  ".pytest_cache/",
-  "egg-info/",
-  ".git/",
 ];
 
 const STOP_PATH_SEGMENTS = new Set([
@@ -193,8 +189,12 @@ function normalizeToken(value: string): string {
 }
 
 function isExcludedInventoryPath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/").toLowerCase();
-  return EXCLUDED_INVENTORY_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+  const normalized = path.replace(/\\/g, "/");
+  if (shouldIgnoreScannedPath(normalized)) {
+    return true;
+  }
+  const lower = normalized.toLowerCase();
+  return EXCLUDED_INVENTORY_PREFIXES.some((prefix) => lower.startsWith(prefix));
 }
 
 function addEvidence(

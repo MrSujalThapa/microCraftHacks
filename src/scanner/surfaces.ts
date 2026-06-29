@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isTestFile } from "../shared/files";
+import { shouldIgnoreScannedPath } from "./ignore";
 import type {
   InventoryResult,
   SurfaceAuth,
@@ -301,7 +302,9 @@ export function mapSurfaces(
 ): SurfacesResult {
   const includeTests = options.includeTests ?? false;
   const files = filterSurfaceFiles(
-    inventory.files.map((f) => f.path),
+    inventory.files
+      .map((f) => f.path)
+      .filter((file) => !shouldIgnoreScannedPath(file)),
     includeTests,
   );
 

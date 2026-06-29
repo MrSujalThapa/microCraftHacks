@@ -1,19 +1,14 @@
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 
 import { isTestFile } from "../shared/files";
+import {
+  shouldIgnoreDirName,
+  shouldIgnoreScannedPath,
+} from "./ignore";
 import type { FileEntry, InventoryResult } from "./types";
 
-export const IGNORE_DIR_NAMES = new Set([
-  ".git",
-  "node_modules",
-  "dist",
-  "build",
-  ".next",
-  "coverage",
-]);
-
-export const IGNORE_RELATIVE_PREFIXES = [".swarm/cache", ".swarm/reports"];
+export { IGNORE_DIR_NAMES } from "./ignore";
 
 const BINARY_EXTENSIONS = new Set([
   ".png",
@@ -87,17 +82,6 @@ const CONFIG_NAMES = new Set([
   ".prettierrc",
   "prettier.config.js",
 ]);
-
-function shouldIgnoreDir(name: string): boolean {
-  return IGNORE_DIR_NAMES.has(name);
-}
-
-function shouldIgnoreRelativePath(relPath: string): boolean {
-  const normalized = relPath.replace(/\\/g, "/");
-  return IGNORE_RELATIVE_PREFIXES.some(
-    (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
-  );
-}
 
 function isBinaryFile(filePath: string): boolean {
   const ext = extname(filePath).toLowerCase();
@@ -192,11 +176,11 @@ export function walkRepo(root: string): InventoryResult {
       const fullPath = join(currentDir, entry.name);
 
       if (entry.isDirectory()) {
-        if (shouldIgnoreDir(entry.name)) {
+        if (shouldIgnoreDirName(entry.name)) {
           continue;
         }
         const rel = relative(root, fullPath);
-        if (shouldIgnoreRelativePath(rel)) {
+        if (shouldIgnoreScannedPath(rel)) {
           continue;
         }
         walk(fullPath);
@@ -208,7 +192,7 @@ export function walkRepo(root: string): InventoryResult {
       }
 
       const relPath = relative(root, fullPath).replace(/\\/g, "/");
-      if (shouldIgnoreRelativePath(relPath)) {
+      if (shouldIgnoreScannedPath(relPath)) {
         continue;
       }
       if (isBinaryFile(fullPath)) {
