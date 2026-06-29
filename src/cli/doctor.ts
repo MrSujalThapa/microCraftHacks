@@ -17,6 +17,10 @@ function formatFolderSummary(folders: { path: string; exists: boolean }[]): stri
   return `${missing.length} missing (${missing.map((folder) => folder.path).join(", ")})`;
 }
 
+function formatKeyPresence(present: boolean): string {
+  return present ? "present" : "missing";
+}
+
 export function runDoctor(): void {
   const status = getDoctorConfigStatus();
   const configLabel = status.valid
@@ -33,4 +37,12 @@ export function runDoctor(): void {
   console.log(`Config    ${configLabel}`);
   console.log(`Folders   ${formatFolderSummary(status.folders)}`);
   console.log(`Execution ${status.execution ?? "n/a"}`);
+
+  if (status.provider) {
+    console.log(
+      `Provider  ${status.provider.name} (${status.provider.sources.provider})`,
+    );
+    console.log(`Model     ${status.provider.model} (${status.provider.sources.model})`);
+    console.log(`OpenAI    key ${formatKeyPresence(status.provider.openaiKeyPresent)}`);
+  }
 }

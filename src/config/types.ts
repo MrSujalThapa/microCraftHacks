@@ -53,4 +53,13 @@ export interface DoctorConfigStatus {
   message: string;
   execution: string | null;
   folders: FolderStatus[];
+  provider: {
+    name: SwarmProvider;
+    model: string;
+    openaiKeyPresent: boolean;
+    sources: {
+      provider: "cli" | "config" | "env" | "default";
+      model: "cli" | "config" | "env" | "default";
+    };
+  } | null;
 }

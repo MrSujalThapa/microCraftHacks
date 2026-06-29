@@ -1,5 +1,6 @@
-import { FindingsError } from "../findings/errors";
 import { ConfigError } from "../config/errors";
+import { ProviderError } from "../config/provider-errors";
+import { FindingsError } from "../findings/errors";
 import { SkillsError } from "../skills/errors";
 
 export function printCliError(error: unknown): void {
@@ -17,6 +18,11 @@ export function printCliError(error: unknown): void {
   }
 
   if (error instanceof FindingsError) {
+    console.error(`Error: ${error.message}`);
+    return;
+  }
+
+  if (error instanceof ProviderError) {
     console.error(`Error: ${error.message}`);
     return;
   }
