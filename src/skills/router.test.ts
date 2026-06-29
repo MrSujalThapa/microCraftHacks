@@ -183,6 +183,117 @@ function relevantSkills(): SkillIndexEntry[] {
   ];
 }
 
+function civicWebAppReport(root: string): ScanReport {
+  return {
+    version: "0.1.0",
+    scannedAt: "2026-06-29T00:00:00.000Z",
+    projectRoot: root,
+    inventory: {
+      totalFiles: 8,
+      byCategory: { typescript: 4, python: 2, config: 2 },
+      files: [
+        { path: "app/profile/page.tsx", category: "typescript" },
+        { path: "app/login/page.tsx", category: "typescript" },
+        { path: "app/map/page.tsx", category: "typescript" },
+        { path: "backend/app/core/auth.py", category: "python" },
+        { path: "backend/app/api/incidents.py", category: "python" },
+        { path: "components/auth/auth-gate.tsx", category: "typescript" },
+        { path: ".env.example", category: "config" },
+        { path: "package.json", category: "config" },
+      ],
+    },
+    stack: [
+      { name: "Next.js", confidence: "high", evidence: ["next.config.ts", "package.json"] },
+      { name: "FastAPI", confidence: "medium", evidence: ["backend/app/main.py"] },
+      { name: "Supabase", confidence: "high", evidence: ["package.json", "supabase/config.toml"] },
+    ],
+    surfaces: {
+      routes: [
+        { path: "/profile", file: "app/profile/page.tsx", framework: "nextjs-app" },
+        { path: "/community", file: "app/community/page.tsx", framework: "nextjs-app" },
+        { path: "/login", file: "app/login/page.tsx", framework: "nextjs-app" },
+        { path: "/map", file: "app/map/page.tsx", framework: "nextjs-app" },
+      ],
+      api: [
+        { path: "/incidents", file: "backend/app/api/incidents.py", framework: "fastapi" },
+        { path: "/api/users", file: "backend/app/api/users.py", framework: "fastapi" },
+      ],
+      auth: [
+        { file: ".env.example", type: "config" },
+        { file: "backend/app/core/auth.py", type: "middleware" },
+        { file: "components/auth/auth-gate.tsx", type: "middleware" },
+      ],
+      dataModels: [],
+    },
+  };
+}
+
+function noisySemanticSkills(): SkillIndexEntry[] {
+  return [
+    {
+      name: "building-threat-actor-profile-from-osint",
+      description: "Build threat actor profiles from OSINT",
+      tags: ["osint", "threat-intel", "actor"],
+      path: "skills/external/threat-actor/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "correlating-threat-campaigns",
+      description: "Correlate threat campaigns and IOCs",
+      tags: ["campaign", "threat-intel", "ioc"],
+      path: "skills/external/campaign/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "implementing-delinea-secret-server-for-pam",
+      description: "Implement Delinea Secret Server for privileged access",
+      tags: ["delinea", "pam", "secret-server"],
+      path: "skills/external/delinea/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "implementing-cisco-ise-network-access-control",
+      description: "Configure Cisco ISE for network access control",
+      tags: ["cisco", "ise", "nac", "radius"],
+      path: "skills/external/cisco-ise/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "implementing-microsoft-entra-passwordless-authentication",
+      description: "Microsoft Entra passwordless and passkey auth",
+      tags: ["entra", "azure-ad", "passwordless", "passkey"],
+      path: "skills/external/entra/SKILL.md",
+      sourceType: "external",
+    },
+  ];
+}
+
+function genericSecuritySkills(): SkillIndexEntry[] {
+  return [
+    {
+      name: "detecting-broken-object-property-level-authorization",
+      description: "Detect broken object property level authorization in APIs",
+      tags: ["api", "authorization", "access-control", "owasp"],
+      path: "skills/external/bopla/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "implementing-secret-scanning-with-gitleaks",
+      description: "Scan env and config files for leaked secrets",
+      tags: ["secret", "credential", "env", "config"],
+      path: "skills/external/gitleaks/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "reviewing-auth-middleware-coverage",
+      description: "Review authentication middleware coverage",
+      tags: ["auth", "authentication", "access-control"],
+      path: "skills/external/auth-review/SKILL.md",
+      sourceType: "external",
+    },
+  ];
+}
+
 afterEach(() => {
   while (tempRoots.length > 0) {
     rmSync(tempRoots.pop()!, { recursive: true, force: true });
@@ -268,7 +379,9 @@ describe("routeSkills", () => {
     expect(selected.map((s) => s.name)).toContain("detecting-broken-access-control");
     expect(selected.map((s) => s.name)).not.toContain("unrelated-skill");
     expect(selected[0].reasons.length).toBeGreaterThan(0);
-    expect(selected[0].reasons[0]).toMatch(/route:|auth surface:|stack:|source file:/);
+    expect(selected[0].reasons[0]).toMatch(
+      /route handler:|route segment:|auth surface:|stack:|source file:|gate /,
+    );
     expect(selected[0].agentTypes).toContain("auth");
   });
 
@@ -456,6 +569,74 @@ describe("routeSkills", () => {
         expect(reason).not.toMatch(/\.test\.(ts|tsx|js|jsx)/);
         expect(reason).not.toMatch(/\.spec\.(ts|tsx|js|jsx)/);
       }
+    }
+  });
+
+  it("does not route /profile to threat actor profile OSINT skills", () => {
+    const report = civicWebAppReport("/tmp/civic");
+    const selected = routeSkills(report, {
+      skills: [...genericSecuritySkills(), ...noisySemanticSkills()],
+    });
+    const names = selected.map((skill) => skill.name);
+
+    expect(names).not.toContain("building-threat-actor-profile-from-osint");
+  });
+
+  it("does not route /incidents to threat campaign correlation skills", () => {
+    const report = civicWebAppReport("/tmp/civic");
+    const selected = routeSkills(report, {
+      skills: [...genericSecuritySkills(), ...noisySemanticSkills()],
+    });
+    const names = selected.map((skill) => skill.name);
+
+    expect(names).not.toContain("correlating-threat-campaigns");
+  });
+
+  it("does not route .env.example to Delinea PAM skills", () => {
+    const report = civicWebAppReport("/tmp/civic");
+    const selected = routeSkills(report, {
+      skills: [...genericSecuritySkills(), ...noisySemanticSkills()],
+    });
+    const names = selected.map((skill) => skill.name);
+
+    expect(names).not.toContain("implementing-delinea-secret-server-for-pam");
+  });
+
+  it("does not route /login to Cisco ISE, Entra, or passwordless skills without matching evidence", () => {
+    const report = civicWebAppReport("/tmp/civic");
+    const selected = routeSkills(report, {
+      skills: [...genericSecuritySkills(), ...noisySemanticSkills()],
+    });
+    const names = selected.map((skill) => skill.name);
+
+    expect(names).not.toContain("implementing-cisco-ise-network-access-control");
+    expect(names).not.toContain("implementing-microsoft-entra-passwordless-authentication");
+  });
+
+  it("still routes generic auth, API, and secret scanning skills for civic web apps", () => {
+    const report = civicWebAppReport("/tmp/civic");
+    const selected = routeSkills(report, {
+      skills: [...genericSecuritySkills(), ...noisySemanticSkills()],
+    });
+    const names = selected.map((skill) => skill.name);
+
+    expect(names).toContain("detecting-broken-object-property-level-authorization");
+    expect(names).toContain("implementing-secret-scanning-with-gitleaks");
+    expect(names).toContain("reviewing-auth-middleware-coverage");
+
+    for (const skill of selected) {
+      expect(skill.score).toBeLessThanOrEqual(0.95);
+      expect(skill.reasons.some((reason) => reason.startsWith("gate "))).toBe(false);
+      expect(
+        skill.reasons.some(
+          (reason) =>
+            reason.includes("auth surface:") ||
+            reason.includes("route handler:") ||
+            reason.includes("route segment:") ||
+            reason.includes("config:") ||
+            reason.includes("stack:"),
+        ),
+      ).toBe(true);
     }
   });
 });

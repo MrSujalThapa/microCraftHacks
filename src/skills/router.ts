@@ -9,6 +9,11 @@ import { SkillsError } from "./errors";
 import { loadSkillBodies } from "./loader";
 import { readSkillsIndex } from "./indexer";
 import { getRoutedSkillsPath } from "./paths";
+import {
+  capRoutedScore,
+  evaluateSemanticGate,
+  isGenericRouteSegment,
+} from "./gates";
 import type { RouteResult, RoutedSkillSelection, RoutedSkillsOutput, SkillIndexEntry } from "./types";
 
 const AGENT_TAG_MAP: Record<string, string[]> = {
@@ -313,15 +318,15 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
       }
 
       evidence.hasApiSurfaces = true;
-      addEvidence(evidence, route.path, `route: ${route.path}`, 5);
       addEvidence(evidence, route.file, `route handler: ${route.file}`, 4);
       if (route.framework) {
         addEvidence(evidence, route.framework, `route framework: ${route.framework}`, 3);
       }
       for (const segment of route.path.split("/")) {
-        if (segment && segment !== "api" && segment !== "v1") {
-          addEvidence(evidence, segment, `route: ${route.path}`, 4);
+        if (isGenericRouteSegment(segment)) {
+          continue;
         }
+        addEvidence(evidence, segment, `route segment: ${route.path}`, 3);
       }
       const pathLower = route.path.toLowerCase();
       if (pathLower.includes("websocket") || pathLower.includes("/ws") || pathLower.includes("socket")) {
@@ -332,8 +337,8 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
         addEvidence(evidence, "rest", `route handler: ${route.file}`, 2);
       }
       if (pathLower.includes("login") || pathLower.includes("auth")) {
-        addEvidence(evidence, "authorization", `route: ${route.path}`, 3);
-        addEvidence(evidence, "authentication", `route: ${route.path}`, 3);
+        addEvidence(evidence, "authorization", `route segment: ${route.path}`, 3);
+        addEvidence(evidence, "authentication", `route segment: ${route.path}`, 3);
       }
     }
 
@@ -404,7 +409,8 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
       if (
         token.length >= 4 &&
         !GENERIC_TERMS.has(token) &&
-        !STOP_PATH_SEGMENTS.has(token)
+        !STOP_PATH_SEGMENTS.has(token) &&
+        !isGenericRouteSegment(segment)
       ) {
         addEvidence(evidence, token, `source file: ${file.path}`, 2);
       }
@@ -587,14 +593,16 @@ function reasonPriority(reason: string): number {
 
 function isConcreteReason(reason: string): boolean {
   return (
-    reason.startsWith("route:") ||
+    reason.startsWith("route handler:") ||
+    reason.startsWith("route segment:") ||
     reason.startsWith("auth surface:") ||
     reason.startsWith("auth type:") ||
     reason.startsWith("stack:") ||
     reason.startsWith("config:") ||
     reason.startsWith("source file:") ||
-    reason.startsWith("route handler:") ||
-    reason.startsWith("data model")
+    reason.startsWith("semantic source:") ||
+    reason.startsWith("data model") ||
+    reason.startsWith("gate ")
   );
 }
 
@@ -609,12 +617,20 @@ function hasUnsupportedDomain(skill: SkillIndexEntry, evidence: RepoEvidence): b
 }
 
 export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): RoutedSkillSelection | null {
+  const semantic = evaluateSemanticGate(skill, evidence);
+  if (!semantic.passed) {
+    return null;
+  }
+
   if (hasUnsupportedDomain(skill, evidence) || !passesEvidenceGates(skill, evidence)) {
     return null;
   }
 
   const tokens = skillMatchTokens(skill);
   const reasons: string[] = [];
+  if (semantic.gate && semantic.reason) {
+    reasons.push(semantic.reason);
+  }
   let score = 0;
   let concreteMatches = 0;
 
@@ -660,8 +676,8 @@ export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): Rout
     return null;
   }
 
-  const normalizedScore = Math.min(0.95, score / SCORE_NORMALIZER);
-  if (normalizedScore < MIN_ROUTE_SCORE) {
+  const rawScore = score / SCORE_NORMALIZER;
+  if (rawScore < MIN_ROUTE_SCORE) {
     return null;
   }
 
@@ -669,11 +685,12 @@ export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): Rout
     .sort((left, right) => reasonPriority(left) - reasonPriority(right))
     .slice(0, 5);
   const matchedTokens = tokens.filter((token) => evidence.keywords.has(token));
+  const dedupedConcreteMatches = uniqueReasons.filter(isConcreteReason).length;
 
   return {
     name: skill.name,
     path: skill.path,
-    score: Number(normalizedScore.toFixed(2)),
+    score: capRoutedScore(rawScore, dedupedConcreteMatches, uniqueReasons),
     reasons: uniqueReasons,
     agentTypes: inferAgentTypes(skill, matchedTokens),
   };
