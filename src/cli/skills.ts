@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 
 import { loadConfig } from "../config/load";
 import { printCliError } from "./errors";
+import { buildSkillsIndex, printSkillsList, readSkillsIndex } from "../skills/indexer";
 import { syncSkills } from "../skills/sync";
 
 export function runSkillsSyncCommand(options: { repo?: string; ref?: string } = {}): void {
@@ -25,6 +26,28 @@ export function runSkillsSyncCommand(options: { repo?: string; ref?: string } = 
   console.log(`Lockfile: ${result.lockfilePath}`);
   console.log(`Commit: ${result.lockfile.commit}`);
   console.log(`Skills root: ${result.lockfile.skillsRoot}`);
+}
+
+export function runSkillsIndexCommand(): void {
+  const root = resolve(process.cwd());
+  const config = loadConfig(root);
+
+  const result = buildSkillsIndex(root, config);
+
+  console.log("Skills index complete.");
+  console.log(`Indexed: ${result.index.count} skills`);
+  for (const warning of result.skipped) {
+    console.warn(`Warning: ${warning}`);
+  }
+  console.log(`Index: ${result.indexPath}`);
+}
+
+export function runSkillsListCommand(): void {
+  const root = resolve(process.cwd());
+  const config = loadConfig(root);
+
+  const index = readSkillsIndex(root, config);
+  printSkillsList(index);
 }
 
 export function runSkillsCommand(action: () => void): void {

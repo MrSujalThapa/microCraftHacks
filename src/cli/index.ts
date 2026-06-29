@@ -6,7 +6,7 @@ import { runDoctor } from "./doctor";
 import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
-import { runSkillsCommand, runSkillsSyncCommand } from "./skills";
+import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
 const program = new Command();
@@ -53,6 +53,20 @@ skillsCommand
   .option("--ref <ref>", "Optional branch/tag/commit to pin")
   .action((options: { repo?: string; ref?: string }) => {
     runSkillsCommand(() => runSkillsSyncCommand(options));
+  });
+
+skillsCommand
+  .command("index")
+  .description("Build skills index from external and local-approved SKILL.md frontmatter")
+  .action(() => {
+    runSkillsCommand(() => runSkillsIndexCommand());
+  });
+
+skillsCommand
+  .command("list")
+  .description("List indexed skills")
+  .action(() => {
+    runSkillsCommand(() => runSkillsListCommand());
   });
 
 program.parse(process.argv);
