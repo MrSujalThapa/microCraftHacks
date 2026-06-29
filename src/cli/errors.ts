@@ -1,9 +1,25 @@
 import { ConfigError } from "../config/errors";
 import { ProviderError } from "../config/provider-errors";
+import { AgentRuntimeError } from "../agents/runtime";
 import { FindingsError } from "../findings/errors";
 import { SkillsError } from "../skills/errors";
 
+function printProcessOutput(label: string, text: string): void {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  console.error(`${label}:`);
+  console.error(trimmed);
+}
+
 export function printCliError(error: unknown): void {
+  if (error instanceof AgentRuntimeError) {
+    console.error(`Error: ${error.message}`);
+    printProcessOutput("Python stdout", error.stdout);
+    printProcessOutput("Python stderr", error.stderr);
+    return;
+  }
   if (error instanceof ConfigError) {
     console.error(`Error: ${error.message}`);
     if (error.code === "MISSING") {

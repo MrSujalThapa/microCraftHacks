@@ -101,7 +101,13 @@ def main(argv: list[str] | None = None) -> int:
         mode=args.mode,
         from_cache=args.from_cache,
     )
-    run_bridge(args.scan_report, args.routed_skills, args.output, runtime_config=runtime_config)
+    try:
+        run_bridge(args.scan_report, args.routed_skills, args.output, runtime_config=runtime_config)
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return 1
     return 0
 
 

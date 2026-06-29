@@ -130,7 +130,7 @@ def finalize_context_node(state: GraphState) -> GraphState:
     runtime_config = state.get("runtime_config")
     max_items = 8
     if isinstance(runtime_config, RuntimeConfig):
-        max_items = runtime_config.max_selected_context
+        max_items = runtime_config.effective_max_selected_context()
     selected = finalize_context(state.get("retrieved_context", []), max_items=max_items)
 
     return {

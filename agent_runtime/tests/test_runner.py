@@ -14,6 +14,107 @@ def test_build_parser_has_bridge_flags():
     assert "--scan-report" in help_text
     assert "--routed-skills" in help_text
     assert "--output" in help_text
+    assert "--mode" in help_text
+    assert "--from-cache" in help_text
+
+
+def test_main_demo_mode_exits_zero(tmp_path: Path):
+    scan_report_path = tmp_path / "scan-demo.json"
+    routed_skills_path = tmp_path / "routed-demo.json"
+    output_path = tmp_path / "scan-demo-findings.json"
+
+    scan_report_path.write_text(
+        json.dumps(
+            {
+                "version": "0.1.0",
+                "scannedAt": "2026-06-29T12:00:00.000Z",
+                "projectRoot": str(tmp_path),
+                "inventory": {
+                    "totalFiles": 0,
+                    "byCategory": {},
+                    "files": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    routed_skills_path.write_text(
+        json.dumps(
+            {
+                "reportPath": str(scan_report_path),
+                "routedAt": "2026-06-29T12:01:00.000Z",
+                "selected": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "--scan-report",
+                str(scan_report_path),
+                "--routed-skills",
+                str(routed_skills_path),
+                "--output",
+                str(output_path),
+                "--provider",
+                "mock",
+                "--mode",
+                "demo",
+            ]
+        )
+        == 0
+    )
+    assert output_path.exists()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["metrics"]["runtime"]["mode"] == "demo"
+
+
+def test_main_fast_mode_alias_exits_zero(tmp_path: Path):
+    scan_report_path = tmp_path / "scan-fast.json"
+    routed_skills_path = tmp_path / "routed-fast.json"
+    output_path = tmp_path / "scan-fast-findings.json"
+
+    scan_report_path.write_text(
+        json.dumps(
+            {
+                "version": "0.1.0",
+                "scannedAt": "2026-06-29T12:00:00.000Z",
+                "projectRoot": str(tmp_path),
+                "inventory": {"totalFiles": 0, "byCategory": {}, "files": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    routed_skills_path.write_text(
+        json.dumps(
+            {
+                "reportPath": str(scan_report_path),
+                "routedAt": "2026-06-29T12:01:00.000Z",
+                "selected": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "--scan-report",
+                str(scan_report_path),
+                "--routed-skills",
+                str(routed_skills_path),
+                "--output",
+                str(output_path),
+                "--provider",
+                "mock",
+                "--mode",
+                "fast",
+            ]
+        )
+        == 0
+    )
 
 
 def test_main_help_exits_zero():

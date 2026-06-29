@@ -92,6 +92,154 @@ describe("runAgentRuntime", () => {
     expect(markdown).toContain("# Cyber Swarm Findings Report");
     expect(markdown).toContain("## Summary");
   });
+
+  it("invokes Python runtime in demo mode", () => {
+    const repoRoot = resolveRepoRoot();
+    const root = makeTempRoot();
+    const reportPath = join(root, "scan-test.json");
+    const routedSkillsPath = join(root, "routed-skills.json");
+
+    writeFileSync(
+      reportPath,
+      `${JSON.stringify(
+        {
+          version: "0.1.0",
+          scannedAt: "2026-06-29T12:00:00.000Z",
+          projectRoot: root,
+          inventory: {
+            totalFiles: 0,
+            byCategory: {},
+            files: [],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    writeFileSync(
+      routedSkillsPath,
+      `${JSON.stringify(
+        {
+          reportPath,
+          routedAt: "2026-06-29T12:01:00.000Z",
+          selected: [],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = runAgentRuntime({
+      root,
+      reportPath,
+      routedSkillsPath,
+      runtimeRoot: join(repoRoot, "agent_runtime"),
+      provider: "mock",
+      mode: "demo",
+    });
+
+    expect(result.runtimeMetrics?.mode).toBe("demo");
+    expect(existsSync(result.outputPath)).toBe(true);
+  });
+
+  it("invokes Python runtime in fast mode", () => {
+    const repoRoot = resolveRepoRoot();
+    const root = makeTempRoot();
+    const reportPath = join(root, "scan-test.json");
+    const routedSkillsPath = join(root, "routed-skills.json");
+
+    writeFileSync(
+      reportPath,
+      `${JSON.stringify(
+        {
+          version: "0.1.0",
+          scannedAt: "2026-06-29T12:00:00.000Z",
+          projectRoot: root,
+          inventory: {
+            totalFiles: 0,
+            byCategory: {},
+            files: [],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    writeFileSync(
+      routedSkillsPath,
+      `${JSON.stringify(
+        {
+          reportPath,
+          routedAt: "2026-06-29T12:01:00.000Z",
+          selected: [],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = runAgentRuntime({
+      root,
+      reportPath,
+      routedSkillsPath,
+      runtimeRoot: join(repoRoot, "agent_runtime"),
+      provider: "mock",
+      mode: "fast",
+    });
+
+    expect(result.runtimeMetrics?.mode).toBe("fast");
+    expect(existsSync(result.outputPath)).toBe(true);
+  });
+
+  it("surfaces Python stderr when runtime fails", () => {
+    const repoRoot = resolveRepoRoot();
+    const root = makeTempRoot();
+    const reportPath = join(root, "scan-test.json");
+    const routedSkillsPath = join(root, "routed-skills.json");
+
+    writeFileSync(
+      reportPath,
+      `${JSON.stringify(
+        {
+          version: "0.1.0",
+          scannedAt: "2026-06-29T12:00:00.000Z",
+          projectRoot: root,
+          inventory: { totalFiles: 0, byCategory: {}, files: [] },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    writeFileSync(
+      routedSkillsPath,
+      `${JSON.stringify(
+        {
+          reportPath,
+          routedAt: "2026-06-29T12:01:00.000Z",
+          selected: [],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    expect(() =>
+      runAgentRuntime({
+        root,
+        reportPath,
+        routedSkillsPath,
+        runtimeRoot: join(root, "missing-runtime"),
+        provider: "mock",
+        mode: "demo",
+      }),
+    ).toThrow(/Python runtime root not found/);
+  });
 });
 
 function resolveRepoRoot(): string {

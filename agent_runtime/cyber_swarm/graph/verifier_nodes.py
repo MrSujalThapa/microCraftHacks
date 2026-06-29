@@ -9,6 +9,7 @@ from cyber_swarm.graph.state import GraphState
 from cyber_swarm.models.agents import AgentFindingDraft, RejectedFindingDraft
 from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.verifier.dedup import dedupe_verified_findings
+from cyber_swarm.verifier.demo_quality import annotate_demo_quality
 from cyber_swarm.verifier.ranking import rank_verified_findings, severity_counts, _SEVERITY_ORDER
 from cyber_swarm.verifier.verify import verify_drafts
 
