@@ -236,6 +236,19 @@ def _parse_recon_payload(payload: dict[str, Any], fallback: ReconReport) -> Reco
     )
 
 
+SPECIALIST_BY_AGENT = {
+    "auth": "auth-breaker",
+    "api": "api-abuse",
+    "secrets": "secrets-config",
+}
+
+
+def _canonical_specialist(agent_type: str, specialist: str | None = None) -> str:
+    if specialist in SPECIALIST_BY_AGENT.values():
+        return specialist
+    return SPECIALIST_BY_AGENT.get(agent_type, "api-abuse")
+
+
 def _parse_hypotheses_payload(
     payload: dict[str, Any],
     fallback: list[AttackHypothesis],
@@ -249,7 +262,10 @@ def _parse_hypotheses_payload(
             AttackHypothesis(
                 id=str(item.get("id", f"hyp-{len(parsed) + 1}")),
                 agent_type=str(item.get("agent_type", "api")),
-                specialist=str(item.get("specialist", "api-abuse")),
+                specialist=_canonical_specialist(
+                    str(item.get("agent_type", "api")),
+                    str(item.get("specialist", "")) if item.get("specialist") else None,
+                ),
                 title=str(item.get("title", "Security hypothesis")),
                 vulnerability_class=str(item.get("vulnerability_class", "security-misconfiguration")),
                 target_surfaces=[

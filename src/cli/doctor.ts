@@ -40,7 +40,7 @@ export function runDoctor(): void {
 
   if (status.provider) {
     console.log(
-      `Provider  ${status.provider.name} (${status.provider.sources.provider})`,
+      `Provider  ${status.provider.provider} (${status.provider.sources.provider})`,
     );
     console.log(`Model     ${status.provider.model} (${status.provider.sources.model})`);
     console.log(`OpenAI    key ${formatKeyPresence(status.provider.openaiKeyPresent)}`);
