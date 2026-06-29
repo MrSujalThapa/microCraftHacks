@@ -9,6 +9,20 @@ export interface EvidenceRef {
   line_start?: number;
   line_end?: number;
   snippet?: string;
+  evidence_pack_id?: string;
+  symbol?: string;
+}
+
+export interface EvidencePack {
+  id: string;
+  path: string;
+  line_start: number;
+  line_end: number;
+  snippet: string;
+  symbol?: string;
+  surface_type: string;
+  kind: string;
+  route?: string;
 }
 
 export interface SafeReproduction {
@@ -56,6 +70,7 @@ export interface RejectedFinding {
   reason: string;
   failed_checks?: string[];
   missing_evidence?: string[];
+  evidence?: EvidenceRef[];
   source?: string;
 }
 
@@ -65,6 +80,7 @@ export interface FindingsReport {
   status: string;
   startedAt: string;
   completedAt: string;
+  evidencePacks?: EvidencePack[];
   metrics: {
     summary?: {
       verifiedCount?: number;

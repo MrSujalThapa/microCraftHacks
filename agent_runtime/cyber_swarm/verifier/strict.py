@@ -62,16 +62,18 @@ def normalize_path(path: str) -> str:
 
 def is_valid_repo_file_path(path: str, inventory: set[str]) -> bool:
     cleaned = path.strip()
-    if not cleaned or _ABSTRACT_SURFACE.search(cleaned):
-        return False
-    if " " in cleaned:
+    if not cleaned or " " in cleaned:
         return False
     normalized = normalize_path(cleaned)
     if normalized in inventory:
         return True
-    if cleaned.startswith(".env"):
+    if normalized.startswith(".env"):
         return True
-    return bool(_VALID_PATH.match(cleaned))
+    if _VALID_PATH.match(normalized):
+        return True
+    if _ABSTRACT_SURFACE.search(cleaned):
+        return False
+    return False
 
 
 def is_route_surface(value: str, routes: set[str]) -> bool:
@@ -100,6 +102,8 @@ def generic_evidence_failures(draft: AgentFindingDraft) -> list[str]:
         explanation = item.explanation.strip()
         if not explanation:
             failures.append("evidence explanation is empty")
+            continue
+        if item.evidence_pack_id and item.line_start is not None and item.path:
             continue
         if _GENERIC_EVIDENCE.search(explanation):
             failures.append(f"evidence only states file is review-relevant: {explanation[:96]}")

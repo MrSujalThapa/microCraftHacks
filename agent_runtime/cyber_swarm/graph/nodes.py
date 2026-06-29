@@ -244,6 +244,7 @@ def report_stub(state: GraphState) -> GraphState:
                 "grade_context",
                 "rewrite_query",
                 "finalize_context",
+                "build_evidence_packs",
                 "recon_agent",
                 "attack_planner",
                 "specialist_agents",
@@ -286,6 +287,13 @@ def report_stub(state: GraphState) -> GraphState:
         rejected_findings=[*agent_rejected, *verifier_rejected],
         needs_evidence_findings=needs_evidence,
     )
+
+    from cyber_swarm.evidence.models import EvidencePack
+
+    evidence_packs = state.get("evidence_packs", [])
+    output["evidencePacks"] = [
+        pack.to_dict() if isinstance(pack, EvidencePack) else pack for pack in evidence_packs
+    ]
 
     write_json(output_path, output)
     markdown_path = write_markdown_report(str(output_path), output)

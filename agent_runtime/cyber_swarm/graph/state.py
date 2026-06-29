@@ -34,6 +34,7 @@ class GraphState(TypedDict, total=False):
     retrieval_sufficient: bool
     recon_report: ReconReport
     attack_hypotheses: list[AttackHypothesis]
+    evidence_packs: list[Any]
     runtime_config: RuntimeConfig
     provider: Any
     provider_metrics: dict[str, Any]

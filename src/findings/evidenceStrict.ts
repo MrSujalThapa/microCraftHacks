@@ -21,15 +21,25 @@ export interface EvidenceStrictResult {
   reasons: string[];
 }
 
-export function isValidRepoFilePath(path: string): boolean {
+export function isValidRepoFilePath(path: string, inventory?: Set<string>): boolean {
   const cleaned = path.trim();
-  if (!cleaned || ABSTRACT_SURFACE.test(cleaned) || cleaned.includes(" ")) {
+  if (!cleaned || cleaned.includes(" ")) {
     return false;
   }
-  if (cleaned.startsWith(".env")) {
+  const normalized = cleaned.replace(/\\/g, "/").toLowerCase();
+  if (inventory?.has(normalized)) {
     return true;
   }
-  return VALID_PATH.test(cleaned);
+  if (normalized.startsWith(".env")) {
+    return true;
+  }
+  if (VALID_PATH.test(normalized)) {
+    return true;
+  }
+  if (ABSTRACT_SURFACE.test(cleaned)) {
+    return false;
+  }
+  return false;
 }
 
 export function assessEvidenceStrictness(finding: VerifiedFinding): EvidenceStrictResult {
@@ -61,7 +71,12 @@ export function assessEvidenceStrictness(finding: VerifiedFinding): EvidenceStri
   }
 
   for (const item of fileEvidence) {
-    if (!item.explanation || GENERIC_EVIDENCE.test(item.explanation)) {
+    if (!item.evidence_pack_id) {
+      reasons.push("evidence missing evidence_pack_id");
+    }
+    if (item.evidence_pack_id && item.line_start != null && item.path) {
+      // Pack-backed line evidence is treated as concrete in the verifier.
+    } else if (!item.explanation || GENERIC_EVIDENCE.test(item.explanation)) {
       reasons.push(`generic evidence explanation: ${item.explanation ?? "(empty)"}`);
     }
     const blob = [item.snippet, item.explanation, item.path].filter(Boolean).join(" ");

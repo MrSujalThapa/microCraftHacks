@@ -57,6 +57,8 @@ class EvidenceRef:
     line_start: int | None = None
     line_end: int | None = None
     snippet: str | None = None
+    evidence_pack_id: str | None = None
+    symbol: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,7 @@ class VerifierRejectedFinding:
     title: str
     reason: str
     failed_checks: list[str]
+    evidence: list[EvidenceRef] = field(default_factory=list)
     source: Literal["verifier"] = "verifier"
 
 

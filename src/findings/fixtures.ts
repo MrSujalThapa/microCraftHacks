@@ -34,6 +34,8 @@ export function sampleFindingsReport(): FindingsReport {
             line_start: 12,
             line_end: 28,
             snippet: "export function requireAuth(req, res, next) { /* guard */ }",
+            evidence_pack_id: "ep-001",
+            symbol: "requireAuth",
           },
         ],
         impact_hypothesis: "Unauthenticated requests can reach the login handler logic.",

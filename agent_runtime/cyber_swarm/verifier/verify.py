@@ -15,6 +15,8 @@ from cyber_swarm.models.agents import (
     VerificationStatus,
     VerifierRejectedFinding,
 )
+from cyber_swarm.evidence.models import EvidencePack
+from cyber_swarm.evidence.packs import packs_by_id
 from cyber_swarm.rag.redaction import redact_secrets
 from cyber_swarm.verifier.strict import (
     affected_path_failures,
@@ -227,16 +229,48 @@ def _draft_to_verified(
     )
 
 
+def _evidence_pack_failures(
+    draft: AgentFindingDraft,
+    pack_index: dict[str, EvidencePack],
+) -> list[str]:
+    failures: list[str] = []
+    file_evidence = [item for item in draft.evidence if item.type != "skill"]
+
+    for item in file_evidence:
+        if not item.evidence_pack_id:
+            failures.append("evidence missing evidence_pack_id")
+            continue
+        pack = pack_index.get(item.evidence_pack_id)
+        if pack is None:
+            failures.append(f"unknown evidence pack id: {item.evidence_pack_id}")
+            continue
+        if item.path and normalize_path(item.path) != normalize_path(pack.path):
+            failures.append(f"evidence path mismatch for pack {item.evidence_pack_id}")
+        if item.line_start is not None and item.line_start != pack.line_start:
+            failures.append(f"evidence line_start mismatch for pack {item.evidence_pack_id}")
+        if item.line_end is not None and item.line_end != pack.line_end:
+            failures.append(f"evidence line_end mismatch for pack {item.evidence_pack_id}")
+        if item.snippet and pack.snippet:
+            item_snippet = item.snippet.strip()
+            pack_snippet = pack.snippet.strip()
+            if item_snippet != pack_snippet and item_snippet not in pack_snippet and pack_snippet not in item_snippet:
+                failures.append(f"evidence snippet mismatch for pack {item.evidence_pack_id}")
+
+    return failures
+
+
 def verify_draft(
     draft: AgentFindingDraft,
     scan_report: dict,
     *,
     context_paths: set[str] | None = None,
+    evidence_packs: list[EvidencePack] | None = None,
 ) -> VerificationResult:
     """Verify a single draft finding against scan evidence and safety rules."""
     inventory = _inventory_paths(scan_report)
     routes = _known_routes(scan_report)
     context = _context_paths(context_paths or set())
+    pack_index = packs_by_id(evidence_packs or [])
 
     failed: list[str] = []
     needs_more: list[str] = []
@@ -253,6 +287,7 @@ def verify_draft(
     failed.extend(concrete_anchor_failures(draft))
     failed.extend(specific_issue_failures(draft))
     failed.extend(affected_path_failures(draft, inventory, routes))
+    failed.extend(_evidence_pack_failures(draft, pack_index))
 
     surfaces, files = split_surfaces_and_files(draft, inventory, routes)
     if not files:
@@ -299,6 +334,7 @@ def verify_draft(
                 title=draft.title,
                 reason="; ".join(failed),
                 failed_checks=failed,
+                evidence=list(draft.evidence),
             ),
         )
 
@@ -324,13 +360,19 @@ def verify_drafts(
     scan_report: dict,
     *,
     context_paths: set[str] | None = None,
+    evidence_packs: list[EvidencePack] | None = None,
 ) -> tuple[list[VerifiedFinding], list[VerifierRejectedFinding], list[NeedsMoreEvidenceFinding]]:
     verified: list[VerifiedFinding] = []
     rejected: list[VerifierRejectedFinding] = []
     needs_evidence: list[NeedsMoreEvidenceFinding] = []
 
     for draft in drafts:
-        result = verify_draft(draft, scan_report, context_paths=context_paths)
+        result = verify_draft(
+            draft,
+            scan_report,
+            context_paths=context_paths,
+            evidence_packs=evidence_packs,
+        )
         if result.status == "verified" and result.verified is not None:
             verified.append(result.verified)
         elif result.status == "rejected" and result.rejected is not None:

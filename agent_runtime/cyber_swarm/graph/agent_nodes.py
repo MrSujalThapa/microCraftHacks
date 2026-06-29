@@ -133,6 +133,7 @@ def specialist_agents_node(state: GraphState) -> GraphState:
         runtime_input,
         hypotheses,
         state.get("selected_context", []),
+        state.get("evidence_packs", []),
     )
     drafts = drafts[: runtime_config.max_draft_findings]
 

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import re
-
-from cyber_swarm.models.agents import AgentFindingDraft, AttackHypothesis, EvidenceRef, SafeReproduction
-from cyber_swarm.models.retrieval import RetrievedContext
-from cyber_swarm.models.runtime import RuntimeInput
-from cyber_swarm.rag.redaction import redact_secrets
-
-SECRET_PATTERN = re.compile(
-    r"(?i)(api[_-]?key|secret|password|token|private[_-]?key)\s*[:=]\s*\S+"
+from cyber_swarm.agents.shared import (
+    SECRET_PATTERN,
+    file_contains_secret_pattern,
+    skills_for_agent,
+    static_reproduction,
 )
+from cyber_swarm.evidence.refs import evidence_from_pack
+from cyber_swarm.models.agents import AgentFindingDraft, EvidenceRef
+from cyber_swarm.models.retrieval import RetrievedContext
+from cyber_swarm.rag.redaction import redact_secrets
 
 
 def production_context(context: list[RetrievedContext]) -> list[RetrievedContext]:
@@ -34,14 +34,6 @@ def context_for_paths(
     ]
 
 
-def skills_for_agent(runtime_input: RuntimeInput, agent_type: str) -> list[str]:
-    return [
-        skill.name
-        for skill in runtime_input.routed_skills.selected
-        if agent_type in skill.agent_types
-    ][:3]
-
-
 def evidence_from_context(item: RetrievedContext, explanation: str) -> EvidenceRef:
     return EvidenceRef(
         type="skill" if item.source_type == "skill" else "file",
@@ -54,24 +46,17 @@ def evidence_from_context(item: RetrievedContext, explanation: str) -> EvidenceR
     )
 
 
-def static_reproduction(steps: list[str], expected: str) -> SafeReproduction:
-    return SafeReproduction(
-        mode="static-proof",
-        steps=steps,
-        expected_result=expected,
-        safety_notes=[
-            "Static analysis only; no runtime probing or destructive actions.",
-            "Review redacted excerpts locally before any active testing.",
-        ],
-    )
-
-
 def is_vague_draft(draft: AgentFindingDraft) -> tuple[bool, list[str]]:
     missing: list[str] = []
     if len(draft.claim.strip()) < 24:
         missing.append("claim too vague")
     if not draft.evidence:
         missing.append("missing evidence refs")
+    file_evidence = [item for item in draft.evidence if item.type != "skill"]
+    if file_evidence and not all(item.evidence_pack_id for item in file_evidence):
+        missing.append("missing evidence pack refs")
+    if file_evidence and not all(item.line_start is not None and item.path for item in file_evidence):
+        missing.append("missing line-anchored file evidence")
     if not draft.affected_surfaces and not any(item.path for item in draft.evidence):
         missing.append("missing affected surface or file")
     if draft.confidence == "low" and not draft.evidence:
@@ -79,5 +64,14 @@ def is_vague_draft(draft: AgentFindingDraft) -> tuple[bool, list[str]]:
     return (len(missing) > 0, missing)
 
 
-def file_contains_secret_pattern(path_text: str, excerpt: str) -> bool:
-    return bool(SECRET_PATTERN.search(excerpt) or SECRET_PATTERN.search(path_text))
+__all__ = [
+    "SECRET_PATTERN",
+    "context_for_paths",
+    "evidence_from_context",
+    "evidence_from_pack",
+    "file_contains_secret_pattern",
+    "is_vague_draft",
+    "production_context",
+    "skills_for_agent",
+    "static_reproduction",
+]

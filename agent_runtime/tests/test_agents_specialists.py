@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from cyber_swarm.agents.specialists.runner import run_specialists
+from cyber_swarm.evidence.packs import build_evidence_packs
 from cyber_swarm.models.agents import AttackHypothesis
 from cyber_swarm.models.repo import (
     FileInventoryItem,
@@ -128,7 +129,12 @@ def test_specialists_emit_structured_drafts_and_redact_secrets(tmp_path: Path):
         ),
     ]
 
-    drafts, rejected = run_specialists(runtime_input, _hypotheses(), context)
+    drafts, rejected = run_specialists(
+        runtime_input,
+        _hypotheses(),
+        context,
+        build_evidence_packs(tmp_path, runtime_input.repo, {"src/auth.ts", ".env"}),
+    )
 
     assert drafts
     secret_draft = next(item for item in drafts if item.specialist == "secrets-config")
@@ -155,7 +161,7 @@ def test_specialists_reject_vague_findings_without_evidence(tmp_path: Path):
         )
     ]
 
-    drafts, rejected = run_specialists(runtime_input, vague_hypothesis, [])
+    drafts, rejected = run_specialists(runtime_input, vague_hypothesis, [], evidence_packs=[])
 
     assert not drafts
     assert rejected

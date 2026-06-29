@@ -44,7 +44,11 @@ export function formatFixRefusal(findingId: string, reasons: string[]): string {
   return lines.join("\n");
 }
 
-export function formatFixPlan(finding: VerifiedFinding, reportPath: string): string {
+export function formatFixPlan(
+  finding: VerifiedFinding,
+  reportPath: string,
+  evidencePacks: import("./types").EvidencePack[] | undefined = undefined,
+): string {
   const strictness = assessEvidenceStrictness(finding);
   if (!strictness.strict) {
     return formatFixRefusal(finding.id, strictness.reasons);
@@ -83,7 +87,7 @@ export function formatFixPlan(finding: VerifiedFinding, reportPath: string): str
   }
   lines.push("");
   lines.push("Recommended changes");
-  const changes = buildConcreteChanges(finding, template);
+  const changes = buildConcreteChanges(finding, template, evidencePacks);
   for (const [index, change] of changes.entries()) {
     lines.push(`  ${index + 1}. ${change}`);
   }
@@ -96,6 +100,10 @@ export function formatFixPlan(finding: VerifiedFinding, reportPath: string): str
         ? `:${item.line_start}${item.line_end != null ? `-${item.line_end}` : ""}`
         : "";
     lines.push(`  - [${item.type}] ${path}${range}: ${item.explanation}`);
+    const snippet = resolveFixSnippet(item, evidencePacks);
+    if (snippet) {
+      lines.push(`    snippet: ${snippet.split("\n")[0]}`);
+    }
   }
   lines.push("");
   lines.push("Validation steps");
@@ -120,6 +128,7 @@ export function formatFixPlan(finding: VerifiedFinding, reportPath: string): str
 function buildConcreteChanges(
   finding: VerifiedFinding,
   template: FixTemplate | undefined,
+  evidencePacks: import("./types").EvidencePack[] | undefined,
 ): string[] {
   const changes: string[] = [];
 
@@ -131,7 +140,10 @@ function buildConcreteChanges(
       item.line_start != null
         ? `${item.path}:${item.line_start}${item.line_end != null ? `-${item.line_end}` : ""}`
         : item.path;
-    changes.push(`Patch ${location} — ${item.explanation}`);
+    const symbol = item.symbol ? ` (${item.symbol})` : "";
+    const snippet = resolveFixSnippet(item, evidencePacks);
+    const snippetHint = snippet ? ` — see: ${snippet.split("\n")[0]}` : "";
+    changes.push(`Patch ${location}${symbol} — ${item.explanation}${snippetHint}`);
   }
 
   if (changes.length === 0) {
@@ -172,4 +184,17 @@ function collectFixLocations(finding: VerifiedFinding): string[] {
   }
 
   return [...locations];
+}
+
+function resolveFixSnippet(
+  item: VerifiedFinding["evidence"][number],
+  evidencePacks: import("./types").EvidencePack[] | undefined,
+): string | undefined {
+  if (item.snippet?.trim()) {
+    return item.snippet;
+  }
+  if (!item.evidence_pack_id || !evidencePacks?.length) {
+    return undefined;
+  }
+  return evidencePacks.find((pack) => pack.id === item.evidence_pack_id)?.snippet;
 }

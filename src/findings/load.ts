@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { FindingsError } from "./errors";
-import type { FindingsReport, VerifiedFinding } from "./types";
+import type { FindingsReport, RejectedFinding, VerifiedFinding } from "./types";
 
 const FINDINGS_SUFFIX = "-findings.json";
 
@@ -77,27 +77,42 @@ export function loadFindingsReport(reportPath: string): FindingsReport {
   return report;
 }
 
-export function findVerifiedFinding(
+export type ExplainableFinding =
+  | { kind: "verified"; finding: VerifiedFinding }
+  | { kind: "rejected"; finding: RejectedFinding };
+
+export function findExplainableFinding(
   report: FindingsReport,
   findingId: string,
-): VerifiedFinding {
-  const finding = report.verifiedFindings.find((item) => item.id === findingId);
-  if (finding) {
-    return finding;
+): ExplainableFinding {
+  const verified = report.verifiedFindings.find((item) => item.id === findingId);
+  if (verified) {
+    return { kind: "verified", finding: verified };
   }
 
   const rejected = report.rejectedFindings.find(
     (item) => item.draft_id === findingId || item.title === findingId,
   );
   if (rejected) {
-    throw new FindingsError(
-      `Finding "${findingId}" was rejected and cannot be explained or fixed: ${rejected.reason}`,
-      "NOT_FOUND",
-    );
+    return { kind: "rejected", finding: rejected };
   }
 
   throw new FindingsError(
-    `Verified finding not found: ${findingId}. Run \`swarm findings\` to list available IDs.`,
+    `Finding not found: ${findingId}. Run \`swarm findings\` to list available IDs.`,
     "NOT_FOUND",
   );
+}
+
+export function findVerifiedFinding(
+  report: FindingsReport,
+  findingId: string,
+): VerifiedFinding {
+  const explainable = findExplainableFinding(report, findingId);
+  if (explainable.kind === "rejected") {
+    throw new FindingsError(
+      `Finding "${findingId}" was rejected and cannot be fixed: ${explainable.finding.reason}`,
+      "NOT_FOUND",
+    );
+  }
+  return explainable.finding;
 }

@@ -127,6 +127,7 @@ def test_run_workflow_executes_all_stages(tmp_path: Path):
         "grade_context",
         "rewrite_query",
         "finalize_context",
+        "build_evidence_packs",
         "recon_agent",
         "attack_planner",
         "specialist_agents",

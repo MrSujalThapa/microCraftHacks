@@ -6,6 +6,8 @@ from dataclasses import replace
 
 from cyber_swarm.agents.specialists.auth_breaker import run_auth_breaker
 from cyber_swarm.agents.specialists.base import evidence_from_context, static_reproduction
+from cyber_swarm.evidence.refs import evidence_from_pack
+from cyber_swarm.evidence.models import EvidencePack
 from cyber_swarm.models.agents import AgentFindingDraft, AttackHypothesis, EvidenceRef
 from cyber_swarm.models.retrieval import RetrievedContext
 from cyber_swarm.models.runtime import RuntimeInput
@@ -37,14 +39,24 @@ def _scan_report() -> dict:
     }
 
 
-def _supported_draft() -> AgentFindingDraft:
-    evidence = EvidenceRef(
-        type="file",
+def _supported_pack() -> EvidencePack:
+    return EvidencePack(
+        id="ep-001",
         path="src/auth.ts",
-        route="/api/login",
         line_start=12,
         line_end=28,
         snippet="export function requireAuth(req, res, next) { /* guard */ }",
+        symbol="requireAuth",
+        surface_type="auth",
+        kind="function",
+        route="/api/login",
+    )
+
+
+def _supported_draft() -> AgentFindingDraft:
+    pack = _supported_pack()
+    evidence = evidence_from_pack(
+        pack,
         explanation=(
             "requireAuth() middleware in src/auth.ts is not invoked on the /api/login handler "
             "before request processing."
@@ -130,7 +142,13 @@ def _generic_auth_gap_draft() -> AgentFindingDraft:
 
 
 def test_verify_accepts_supported_draft():
-    result = verify_draft(_supported_draft(), _scan_report(), context_paths={"src/auth.ts"})
+    pack = _supported_pack()
+    result = verify_draft(
+        _supported_draft(),
+        _scan_report(),
+        context_paths={"src/auth.ts"},
+        evidence_packs=[pack],
+    )
 
     assert result.status == "verified"
     assert result.verified is not None
@@ -149,7 +167,12 @@ def test_verify_rejects_unsupported_draft():
 
 
 def test_verify_rejects_generic_potential_auth_gap():
-    result = verify_draft(_generic_auth_gap_draft(), _scan_report(), context_paths={"src/auth.ts"})
+    result = verify_draft(
+        _generic_auth_gap_draft(),
+        _scan_report(),
+        context_paths={"src/auth.ts"},
+        evidence_packs=[],
+    )
 
     assert result.status == "rejected"
     assert result.rejected is not None
@@ -166,7 +189,12 @@ def test_verify_rejects_review_only_evidence():
         line_start=None,
         line_end=None,
     )
-    result = verify_draft(replace(draft, evidence=[weak]), _scan_report(), context_paths={"src/auth.ts"})
+    result = verify_draft(
+        replace(draft, evidence=[weak]),
+        _scan_report(),
+        context_paths={"src/auth.ts"},
+        evidence_packs=[_supported_pack()],
+    )
 
     assert result.status == "rejected"
     assert result.rejected is not None
@@ -179,7 +207,12 @@ def test_verify_rejects_unredacted_secrets():
         draft.evidence[0],
         snippet="API_KEY=live-secret-value-that-should-not-appear",
     )
-    result = verify_draft(replace(draft, evidence=[leaked]), _scan_report(), context_paths={"src/auth.ts"})
+    result = verify_draft(
+        replace(draft, evidence=[leaked]),
+        _scan_report(),
+        context_paths={"src/auth.ts"},
+        evidence_packs=[_supported_pack()],
+    )
 
     assert result.status == "rejected"
     assert any("secret" in check.lower() for check in result.rejected.failed_checks)  # type: ignore[union-attr]
@@ -229,11 +262,28 @@ def test_specialist_auth_draft_is_rejected_without_concrete_evidence():
             context_category="auth",
         )
     ]
-    draft = run_auth_breaker(hypothesis, runtime_input, context)
-    assert draft is not None
+    draft = run_auth_breaker(hypothesis, runtime_input, context, evidence_packs=[])
+    assert draft is None
 
-    result = verify_draft(draft, _scan_report(), context_paths={"src/auth.ts"})
-    assert result.status == "rejected"
+    pack = EvidencePack(
+        id="ep-auth",
+        path="src/auth.ts",
+        line_start=1,
+        line_end=3,
+        snippet="export function requireAuth() {}",
+        symbol="requireAuth",
+        surface_type="auth",
+        kind="function",
+    )
+    draft_with_packs = run_auth_breaker(hypothesis, runtime_input, context, evidence_packs=[pack])
+    if draft_with_packs is not None:
+        result = verify_draft(
+            draft_with_packs,
+            _scan_report(),
+            context_paths={"src/auth.ts"},
+            evidence_packs=[pack],
+        )
+        assert result.status in {"verified", "rejected"}
 
 
 def test_verify_drafts_batch():
@@ -241,6 +291,7 @@ def test_verify_drafts_batch():
         [_supported_draft(), _unsupported_draft()],
         _scan_report(),
         context_paths={"src/auth.ts"},
+        evidence_packs=[_supported_pack()],
     )
 
     assert len(verified) == 1

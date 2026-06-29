@@ -56,6 +56,7 @@ def verifier_node(state: GraphState) -> GraphState:
         drafts,
         scan_report,
         context_paths=context_paths,
+        evidence_packs=state.get("evidence_packs", []),
     )
 
     agent_rejected = [

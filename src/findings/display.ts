@@ -1,4 +1,4 @@
-import type { FindingsReport, Severity, VerifiedFinding } from "./types";
+import type { EvidencePack, FindingsReport, RejectedFinding, Severity, VerifiedFinding } from "./types";
 
 const SEVERITY_ORDER: Record<Severity, number> = {
   critical: 0,
@@ -73,7 +73,10 @@ export function formatFindingsTable(report: FindingsReport, reportPath: string):
   return lines.join("\n");
 }
 
-export function formatFindingExplanation(finding: VerifiedFinding): string {
+export function formatFindingExplanation(
+  finding: VerifiedFinding,
+  evidencePacks: EvidencePack[] | undefined = undefined,
+): string {
   const lines: string[] = [];
 
   lines.push(`${finding.title} (${finding.id})`);
@@ -103,6 +106,7 @@ export function formatFindingExplanation(finding: VerifiedFinding): string {
   for (const item of finding.evidence) {
     const location = formatEvidenceLocation(item);
     lines.push(`  - [${item.type}] ${location}: ${item.explanation}`);
+    appendEvidenceSnippet(lines, item, evidencePacks);
   }
   lines.push("");
   lines.push("Safe reproduction");
@@ -130,6 +134,78 @@ export function formatFindingExplanation(finding: VerifiedFinding): string {
   lines.push(`  Skills: ${finding.selected_skills.join(", ") || "—"}`);
 
   return lines.join("\n");
+}
+
+export function formatRejectedExplanation(
+  finding: RejectedFinding,
+  evidencePacks: EvidencePack[] | undefined = undefined,
+): string {
+  const lines: string[] = [];
+  const id = finding.draft_id ?? finding.title ?? "rejected-finding";
+
+  lines.push(`Rejected finding (${id})`);
+  if (finding.title) {
+    lines.push(`Title: ${finding.title}`);
+  }
+  lines.push(`Reason: ${finding.reason}`);
+  lines.push("");
+
+  if (finding.failed_checks?.length) {
+    lines.push("Failed checks");
+    for (const check of finding.failed_checks) {
+      lines.push(`  - ${check}`);
+    }
+    lines.push("");
+  }
+
+  if (finding.missing_evidence?.length) {
+    lines.push("Missing evidence");
+    for (const item of finding.missing_evidence) {
+      lines.push(`  - ${item}`);
+    }
+    lines.push("");
+  }
+
+  if (finding.evidence?.length) {
+    lines.push("Evidence");
+    for (const item of finding.evidence) {
+      const location = formatEvidenceLocation(item);
+      lines.push(`  - [${item.type}] ${location}: ${item.explanation}`);
+      appendEvidenceSnippet(lines, item, evidencePacks);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function appendEvidenceSnippet(
+  lines: string[],
+  item: VerifiedFinding["evidence"][number],
+  evidencePacks: EvidencePack[] | undefined,
+): void {
+  const snippet = resolveEvidenceSnippet(item, evidencePacks);
+  if (!snippet) {
+    return;
+  }
+  lines.push("    ```");
+  for (const line of snippet.split("\n")) {
+    lines.push(`    ${line}`);
+  }
+  lines.push("    ```");
+}
+
+function resolveEvidenceSnippet(
+  item: VerifiedFinding["evidence"][number],
+  evidencePacks: EvidencePack[] | undefined,
+): string | undefined {
+  if (item.snippet?.trim()) {
+    return item.snippet;
+  }
+  if (!item.evidence_pack_id || !evidencePacks?.length) {
+    return undefined;
+  }
+  const pack = evidencePacks.find((candidate) => candidate.id === item.evidence_pack_id);
+  return pack?.snippet;
 }
 
 function formatEvidenceLocation(item: VerifiedFinding["evidence"][number]): string {
