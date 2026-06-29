@@ -4,7 +4,10 @@ import type { SwarmConfig } from "../config/types";
 import { writeScanReport } from "../report/write";
 import { getPackageVersion } from "../shared/version";
 import { walkRepo } from "./inventory";
+import { detectStack, printStackSummary } from "./stack";
 import type { ScanReport, ScanResult } from "./types";
+
+export { printStackSummary };
 
 export function printInventorySummary(inventory: ScanReport["inventory"]): void {
   console.log(`Files: ${inventory.totalFiles}`);
@@ -33,12 +36,14 @@ export function runScan(root: string, config: SwarmConfig): ScanResult {
   const projectRoot = resolve(root);
   const scannedAt = new Date().toISOString();
   const inventory = walkRepo(projectRoot);
+  const stack = detectStack(projectRoot, inventory);
 
   const report: ScanReport = {
     version: getPackageVersion(),
     scannedAt,
     projectRoot,
     inventory,
+    stack,
   };
 
   const reportPath = writeScanReport(projectRoot, report, config.outputDir);

@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 import { loadConfig } from "../config/load";
 import { printCliError } from "./errors";
-import { runScan, printInventorySummary } from "../scanner";
+import { runScan, printInventorySummary, printStackSummary } from "../scanner";
 
 export function runScanCommand(scanPath?: string): void {
   const root = resolve(scanPath ?? process.cwd());
@@ -12,5 +12,6 @@ export function runScanCommand(scanPath?: string): void {
 
   console.log("Scan complete.");
   printInventorySummary(report.inventory);
+  printStackSummary(report.stack ?? []);
   console.log(`Report: ${reportPath}`);
 }
