@@ -27,7 +27,12 @@ def execute_retrieval_query(
             max_results=query.max_results,
         )
     elif query.target == "code":
-        results = search_code(query.query, repo, max_results=query.max_results)
+        results = search_code(
+            query.query,
+            repo,
+            max_results=query.max_results,
+            filters=query.filters,
+        )
     else:
         results = []
 
@@ -43,6 +48,8 @@ def execute_retrieval_query(
             reason=result.reason,
             line_start=result.line_start,
             line_end=result.line_end,
+            context_category=result.context_category,
+            is_supporting=result.is_supporting,
         )
         for result in results
     ]

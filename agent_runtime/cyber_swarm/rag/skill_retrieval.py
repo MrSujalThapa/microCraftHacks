@@ -66,6 +66,8 @@ def search_skills(
                 excerpt=redact_secrets(excerpt[:DEFAULT_MAX_CHARS]),
                 score=round(score, 3),
                 reason=reason,
+                context_category="skill",
+                is_supporting=False,
             )
         )
 

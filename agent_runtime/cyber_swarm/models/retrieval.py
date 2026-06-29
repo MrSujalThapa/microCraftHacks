@@ -21,6 +21,7 @@ AgentType = Literal[
 ]
 
 RetrievalTarget = Literal["code", "skills", "capabilities"]
+ContextCategory = Literal["source", "config", "route", "schema", "auth", "test", "skill"]
 
 
 @dataclass(frozen=True)
@@ -46,3 +47,5 @@ class RetrievedContext:
     title: str | None = None
     line_start: int | None = None
     line_end: int | None = None
+    context_category: ContextCategory = "source"
+    is_supporting: bool = False

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from cyber_swarm.rag.categories import CATEGORY_PRIORITY
+
 from cyber_swarm.models.retrieval import RetrievedContext, RetrievalQuery
 from cyber_swarm.models.runtime import RuntimeInput
 from cyber_swarm.tools.retrieval import execute_retrieval_query
@@ -111,11 +113,24 @@ def grade_context(results: list[RetrievedContext]) -> dict[str, Any]:
 
 def finalize_context(results: list[RetrievedContext], max_items: int = 8) -> list[RetrievedContext]:
     deduped: dict[str, RetrievedContext] = {}
-    for result in sorted(results, key=lambda item: item.score, reverse=True):
+    for result in sorted(
+        results,
+        key=lambda item: (CATEGORY_PRIORITY.get(item.context_category, 0), item.score),
+        reverse=True,
+    ):
         key = result.source_path or result.id
         if key not in deduped:
             deduped[key] = result
-    return list(deduped.values())[:max_items]
+
+    primary = [item for item in deduped.values() if item.context_category != "test"]
+    supporting = [item for item in deduped.values() if item.context_category == "test"]
+
+    selected = primary[:max_items]
+    if len(selected) < max_items and supporting:
+        remaining = max_items - len(selected)
+        selected.extend(supporting[:remaining])
+
+    return selected[:max_items]
 
 
 def serialize_context(items: list[RetrievedContext]) -> list[dict[str, Any]]:
