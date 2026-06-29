@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import type { SwarmConfig } from "../config/types";
 import type { ScanReport } from "../scanner/types";
+import { isTestFile } from "../shared/files";
 import { SkillsError } from "./errors";
 import { loadSkillBodies } from "./loader";
 import { readSkillsIndex } from "./indexer";
@@ -99,6 +100,9 @@ const SSO_EVIDENCE = ["oauth", "saml", "sso", "oidc", "openid"];
 const WEBAUTHN_EVIDENCE = ["webauthn", "fido", "u2f", "passkey", "security-key", "securitykey"];
 const CREDENTIAL_STUFFING_AUTH = ["login", "auth", "signin", "sign-in"];
 const CREDENTIAL_STUFFING_ABUSE = ["rate-limit", "ratelimit", "bruteforce", "brute-force", "session"];
+const MFA_EVIDENCE = ["mfa", "2fa", "totp", "duo"];
+const MTLS_EVIDENCE = ["mtls", "m-tls", "mutual-tls", "client-cert", "client-certificate"];
+const PASS_THE_HASH_EVIDENCE = ["ntlm", "smb", "active-directory", "activedirectory", "windows-domain"];
 
 const SCORE_NORMALIZER = 22;
 const MIN_ROUTE_SCORE = 0.22;
@@ -172,12 +176,16 @@ export interface RepoEvidence {
   detectedDomains: Set<string>;
   hasApiSurfaces: boolean;
   hasAuthSurfaces: boolean;
+  hasProductionAuthSurfaces: boolean;
   hasSecretsSignals: boolean;
   hasDependencySignals: boolean;
   hasWebsocketEvidence: boolean;
   hasCredentialStuffingEvidence: boolean;
   hasSsoEvidence: boolean;
   hasWebauthnEvidence: boolean;
+  hasMfaEvidence: boolean;
+  hasMtlsEvidence: boolean;
+  hasPassTheHashEvidence: boolean;
 }
 
 function normalizeToken(value: string): string {
@@ -229,6 +237,15 @@ function updateEvidenceGates(evidence: RepoEvidence, normalized: string): void {
   if (WEBAUTHN_EVIDENCE.includes(normalized)) {
     evidence.hasWebauthnEvidence = true;
   }
+  if (MFA_EVIDENCE.includes(normalized)) {
+    evidence.hasMfaEvidence = true;
+  }
+  if (MTLS_EVIDENCE.includes(normalized)) {
+    evidence.hasMtlsEvidence = true;
+  }
+  if (PASS_THE_HASH_EVIDENCE.includes(normalized)) {
+    evidence.hasPassTheHashEvidence = true;
+  }
 }
 
 function refreshCredentialStuffingGate(evidence: RepoEvidence): void {
@@ -240,6 +257,10 @@ function refreshCredentialStuffingGate(evidence: RepoEvidence): void {
 function basenameWithoutExt(path: string): string {
   const base = path.split(/[\\/]/).pop() ?? path;
   return base.replace(/\.[^.]+$/, "");
+}
+
+function isProductionEvidencePath(path: string): boolean {
+  return !isTestFile(path);
 }
 
 function isProjectSourcePath(path: string): boolean {
@@ -258,12 +279,16 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
     detectedDomains: new Set(),
     hasApiSurfaces: false,
     hasAuthSurfaces: false,
+    hasProductionAuthSurfaces: false,
     hasSecretsSignals: false,
     hasDependencySignals: false,
     hasWebsocketEvidence: false,
     hasCredentialStuffingEvidence: false,
     hasSsoEvidence: false,
     hasWebauthnEvidence: false,
+    hasMfaEvidence: false,
+    hasMtlsEvidence: false,
+    hasPassTheHashEvidence: false,
   };
 
   for (const stack of report.stack ?? []) {
@@ -283,6 +308,10 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
   const surfaces = report.surfaces;
   if (surfaces) {
     for (const route of [...surfaces.routes, ...surfaces.api]) {
+      if (!isProductionEvidencePath(route.file)) {
+        continue;
+      }
+
       evidence.hasApiSurfaces = true;
       addEvidence(evidence, route.path, `route: ${route.path}`, 5);
       addEvidence(evidence, route.file, `route handler: ${route.file}`, 4);
@@ -309,7 +338,14 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
     }
 
     for (const auth of surfaces.auth) {
+      if (!isProductionEvidencePath(auth.file)) {
+        continue;
+      }
+
       evidence.hasAuthSurfaces = true;
+      if (!auth.file.startsWith(".env")) {
+        evidence.hasProductionAuthSurfaces = true;
+      }
       addEvidence(evidence, auth.file, `auth surface: ${auth.file}`, 5);
       addEvidence(evidence, "authentication", `auth surface: ${auth.file}`, 3);
       addEvidence(evidence, "authorization", `auth surface: ${auth.file}`, 3);
@@ -322,6 +358,10 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
     }
 
     for (const model of surfaces.dataModels) {
+      if (!isProductionEvidencePath(model.file)) {
+        continue;
+      }
+
       if (model.name) {
         addEvidence(evidence, model.name, `data model: ${model.name}`, 4);
       }
@@ -332,6 +372,10 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
 
   for (const file of report.inventory.files) {
     if (isExcludedInventoryPath(file.path)) {
+      continue;
+    }
+
+    if (isTestFile(file.path) || file.category === "test") {
       continue;
     }
 
@@ -392,6 +436,17 @@ function skillNamedOrTagged(skill: SkillIndexEntry, needles: string[]): boolean 
   return needles.some((needle) => corpus.includes(needle));
 }
 
+function skillRequiresApiEvidence(skill: SkillIndexEntry): boolean {
+  const corpus = skillCorpus(skill);
+  return SURFACE_SKILL_HINTS.api.some((hint) => corpus.includes(hint));
+}
+
+function skillRequiresAuthEvidence(skill: SkillIndexEntry): boolean {
+  const corpus = skillCorpus(skill);
+  const authMatch = SURFACE_SKILL_HINTS.auth.some((hint) => corpus.includes(hint));
+  return authMatch && !skillRequiresApiEvidence(skill);
+}
+
 export function passesEvidenceGates(skill: SkillIndexEntry, evidence: RepoEvidence): boolean {
   if (skillMatchesAny(skill, ["websocket", "socket-io", "socketio"])) {
     return evidence.hasWebsocketEvidence;
@@ -404,6 +459,21 @@ export function passesEvidenceGates(skill: SkillIndexEntry, evidence: RepoEviden
   }
   if (skillMatchesAny(skill, ["webauthn", "fido", "u2f", "passkey", "security-key", "hardware key"])) {
     return evidence.hasWebauthnEvidence;
+  }
+  if (skillMatchesAny(skill, ["duo", "multi-factor", "multifactor", "mfa", "2fa", "totp"])) {
+    return evidence.hasMfaEvidence;
+  }
+  if (skillMatchesAny(skill, ["mtls", "m-tls", "mutual tls", "mutual-tls", "client cert"])) {
+    return evidence.hasMtlsEvidence;
+  }
+  if (skillMatchesAny(skill, ["pass-the-hash", "pass the hash"])) {
+    return evidence.hasPassTheHashEvidence;
+  }
+  if (skillRequiresApiEvidence(skill)) {
+    return evidence.hasApiSurfaces;
+  }
+  if (skillRequiresAuthEvidence(skill)) {
+    return evidence.hasProductionAuthSurfaces || evidence.hasApiSurfaces;
   }
   return true;
 }

@@ -26,6 +26,7 @@ afterEach(() => {
 describe("categorizeFile", () => {
   it("maps common extensions and config filenames", () => {
     expect(categorizeFile("src/index.ts")).toBe("typescript");
+    expect(categorizeFile("src/scanner/surfaces.test.ts")).toBe("test");
     expect(categorizeFile("src/App.tsx")).toBe("typescript");
     expect(categorizeFile("lib/util.js")).toBe("javascript");
     expect(categorizeFile("app/main.py")).toBe("python");

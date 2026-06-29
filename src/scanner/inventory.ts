@@ -1,6 +1,7 @@
 import { readdirSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 
+import { isTestFile } from "../shared/files";
 import type { FileEntry, InventoryResult } from "./types";
 
 export const IGNORE_DIR_NAMES = new Set([
@@ -107,6 +108,10 @@ export function categorizeFile(relativePath: string): string {
   const normalized = relativePath.replace(/\\/g, "/");
   const basename = normalized.split("/").pop() ?? normalized;
   const ext = extname(basename).toLowerCase();
+
+  if (isTestFile(normalized)) {
+    return "test";
+  }
 
   if (CONFIG_NAMES.has(basename) || basename.endsWith(".config.js") || basename.endsWith(".config.ts")) {
     return "config";

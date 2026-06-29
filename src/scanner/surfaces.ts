@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { isTestFile } from "../shared/files";
 import type {
   InventoryResult,
   SurfaceAuth,
@@ -282,8 +283,27 @@ function dedupeAuth(auth: SurfaceAuth[]): SurfaceAuth[] {
   return result.sort((a, b) => a.file.localeCompare(b.file));
 }
 
-export function mapSurfaces(root: string, inventory: InventoryResult): SurfacesResult {
-  const files = inventory.files.map((f) => f.path);
+export interface MapSurfacesOptions {
+  includeTests?: boolean;
+}
+
+function filterSurfaceFiles(files: string[], includeTests: boolean): string[] {
+  if (includeTests) {
+    return files;
+  }
+  return files.filter((file) => !isTestFile(file));
+}
+
+export function mapSurfaces(
+  root: string,
+  inventory: InventoryResult,
+  options: MapSurfacesOptions = {},
+): SurfacesResult {
+  const includeTests = options.includeTests ?? false;
+  const files = filterSurfaceFiles(
+    inventory.files.map((f) => f.path),
+    includeTests,
+  );
 
   const next = scanNextSurfaces(files);
   const expressRoutes = scanExpressSurfaces(root, files);

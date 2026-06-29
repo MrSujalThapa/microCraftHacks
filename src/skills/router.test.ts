@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createDefaultConfig } from "../config/defaults";
+import { walkRepo } from "../scanner/inventory";
+import { mapSurfaces } from "../scanner/surfaces";
 import type { ScanReport } from "../scanner/types";
 import { buildSkillsIndex } from "./indexer";
 import { collectRepoEvidence, passesEvidenceGates, routeSkills, routeSkillsFromReport, scoreSkill } from "./router";
@@ -61,6 +63,32 @@ function gatedSkills(): SkillIndexEntry[] {
       description: "Hardware security key and passkey auth review",
       tags: ["webauthn", "passkey", "auth"],
       path: "skills/external/webauthn/SKILL.md",
+      sourceType: "external",
+    },
+  ];
+}
+
+function specializedSkills(): SkillIndexEntry[] {
+  return [
+    {
+      name: "configuring-multi-factor-authentication-with-duo",
+      description: "Configure Duo MFA",
+      tags: ["mfa", "duo", "authentication"],
+      path: "skills/external/duo/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "implementing-mtls-for-zero-trust-services",
+      description: "Mutual TLS for zero trust",
+      tags: ["mtls", "tls", "authentication"],
+      path: "skills/external/mtls/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "detecting-pass-the-hash-attacks",
+      description: "Detect pass the hash in Windows AD environments",
+      tags: ["pass-the-hash", "ntlm", "windows"],
+      path: "skills/external/pth/SKILL.md",
       sourceType: "external",
     },
   ];
@@ -345,6 +373,90 @@ describe("routeSkills", () => {
     expect(new Set(scores).size).toBeGreaterThan(1);
     expect(scores.every((score) => score === 1)).toBe(false);
     expect(scores.every((score) => score <= 0.95)).toBe(true);
+  });
+
+  it("excludes Duo, mTLS, and pass-the-hash skills without concrete evidence", () => {
+    const report = tsCliReport("/tmp/project");
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.hasMfaEvidence).toBe(false);
+    expect(evidence.hasMtlsEvidence).toBe(false);
+    expect(evidence.hasPassTheHashEvidence).toBe(false);
+
+    for (const skill of specializedSkills()) {
+      expect(passesEvidenceGates(skill, evidence)).toBe(false);
+    }
+
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...specializedSkills()] });
+    const names = selected.map((skill) => skill.name);
+    expect(names).not.toContain("configuring-multi-factor-authentication-with-duo");
+    expect(names).not.toContain("implementing-mtls-for-zero-trust-services");
+    expect(names).not.toContain("detecting-pass-the-hash-attacks");
+  });
+
+  it("does not cite test files as route or auth evidence", () => {
+    const report: ScanReport = {
+      version: "0.1.0",
+      scannedAt: new Date().toISOString(),
+      projectRoot: "/tmp/project",
+      inventory: {
+        totalFiles: 1,
+        byCategory: { typescript: 1 },
+        files: [{ path: "src/server.ts", category: "typescript" }],
+      },
+      surfaces: {
+        routes: [{ path: "/health", file: "src/scanner/surfaces.test.ts", framework: "express" }],
+        api: [{ path: "/api/login", file: "src/scanner/surfaces.test.ts", framework: "express" }],
+        auth: [{ file: "src/scanner/surfaces.test.ts", type: "middleware" }],
+        dataModels: [],
+      },
+    };
+
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.hasApiSurfaces).toBe(false);
+    expect(evidence.hasAuthSurfaces).toBe(false);
+
+    const selected = routeSkills(report, { skills: relevantSkills() });
+    for (const skill of selected) {
+      for (const reason of skill.reasons) {
+        expect(reason).not.toContain(".test.ts");
+        expect(reason).not.toContain(".spec.ts");
+      }
+    }
+  });
+
+  it("does not route API skills from test-only fixtures on this repo", () => {
+    const projectRoot = join(__dirname, "..", "..");
+    if (!existsSync(join(projectRoot, "package.json"))) {
+      return;
+    }
+
+    const inventory = walkRepo(projectRoot);
+    const surfaces = mapSurfaces(projectRoot, inventory);
+    const report: ScanReport = {
+      version: "0.1.0",
+      scannedAt: new Date().toISOString(),
+      projectRoot,
+      inventory,
+      surfaces,
+    };
+
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...specializedSkills()] }, 20);
+    const names = selected.map((skill) => skill.name);
+
+    expect(surfaces.api).toHaveLength(0);
+    expect(names).not.toContain("testing-api-for-broken-object-level-authorization");
+    expect(names).not.toContain("configuring-multi-factor-authentication-with-duo");
+    expect(names).not.toContain("implementing-mtls-for-zero-trust-services");
+    expect(names).not.toContain("detecting-pass-the-hash-attacks");
+
+    for (const skill of selected) {
+      for (const reason of skill.reasons) {
+        expect(reason).not.toMatch(/\.test\.(ts|tsx|js|jsx)/);
+        expect(reason).not.toMatch(/\.spec\.(ts|tsx|js|jsx)/);
+      }
+    }
   });
 });
 
