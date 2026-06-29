@@ -75,6 +75,7 @@ describe("runAgentRuntime", () => {
       reportPath,
       routedSkillsPath,
       runtimeRoot: join(repoRoot, "agent_runtime"),
+      provider: "mock",
     });
 
     expect(existsSync(result.outputPath)).toBe(true);

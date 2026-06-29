@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
@@ -25,6 +27,9 @@ from cyber_swarm.graph.rag_nodes import (
     should_continue_retrieval,
 )
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.models.runtime_config import RuntimeConfig
+from cyber_swarm.providers.base import AgentProvider
+from cyber_swarm.providers.factory import create_provider
 
 
 def build_workflow():
@@ -69,13 +74,29 @@ def build_workflow():
     return graph.compile()
 
 
-def run_workflow(scan_report_path: Path, routed_skills_path: Path, output_path: Path) -> dict:
+def run_workflow(
+    scan_report_path: Path,
+    routed_skills_path: Path,
+    output_path: Path,
+    *,
+    runtime_config: RuntimeConfig | None = None,
+) -> dict:
+    config = runtime_config or RuntimeConfig()
+    provider: AgentProvider = create_provider(
+        config.provider,
+        config.model,
+        timeout_seconds=config.call_timeout_seconds,
+    )
+
     workflow = build_workflow()
     final_state = workflow.invoke(
         {
             "scan_report_path": str(scan_report_path),
             "routed_skills_path": str(routed_skills_path),
             "output_path": str(output_path),
+            "runtime_config": config,
+            "provider": provider,
+            "provider_metrics": {},
             "metrics": {},
             "retrieval_queries": [],
             "retrieved_context": [],
@@ -89,4 +110,22 @@ def run_workflow(scan_report_path: Path, routed_skills_path: Path, output_path: 
     output = final_state.get("output")
     if not isinstance(output, dict):
         raise RuntimeError("LangGraph workflow did not produce output")
+
+    provider_metrics = final_state.get("provider_metrics", {})
+    runtime_metrics: dict[str, Any] = {
+        "provider": config.provider,
+        "model": config.model,
+        "maxSelectedContext": config.max_selected_context,
+        "maxDraftFindings": config.max_draft_findings,
+        "callTimeoutSeconds": config.call_timeout_seconds,
+        "providerCalls": provider.call_log(),
+        "stages": provider_metrics,
+    }
+    output_metrics = dict(output.get("metrics", {}))
+    output_metrics["runtime"] = runtime_metrics
+    output["metrics"] = output_metrics
     return output
+
+
+def serialize_runtime_config(config: RuntimeConfig) -> dict[str, Any]:
+    return asdict(config)

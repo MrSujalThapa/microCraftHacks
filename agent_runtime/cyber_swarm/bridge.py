@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from cyber_swarm.graph.workflow import run_workflow
+from cyber_swarm.models.runtime_config import RuntimeConfig
+from cyber_swarm.schemas.io import write_json
+from cyber_swarm.schemas.report_md import write_markdown_report
 
 
 def _print_summary(output: dict) -> None:
     metrics = output.get("metrics", {})
     verifier = metrics.get("verifier", {})
     ranking = metrics.get("risk_ranking", {})
+    runtime = metrics.get("runtime", {})
     verified = output.get("verifiedFindings", [])
     rejected = output.get("rejectedFindings", [])
     needs = output.get("needsMoreEvidenceFindings", [])
@@ -19,6 +24,21 @@ def _print_summary(output: dict) -> None:
     print(f"  Verified: {len(verified)}")
     print(f"  Rejected: {len(rejected)}")
     print(f"  Needs evidence: {len(needs)}")
+    if runtime:
+        print(
+            "  Runtime: "
+            f"provider={runtime.get('provider', 'unknown')} "
+            f"model={runtime.get('model', 'unknown')} "
+            f"elapsedMs={runtime.get('elapsedMs', 'n/a')}"
+        )
+        calls = runtime.get("providerCalls", [])
+        if isinstance(calls, list) and calls:
+            total_tokens = sum(
+                int(item.get("totalTokens") or 0)
+                for item in calls
+                if isinstance(item, dict)
+            )
+            print(f"  Model calls: {len(calls)}  Tokens: {total_tokens or 'n/a'}")
     if verifier:
         print(
             "  Verifier: "
@@ -35,7 +55,27 @@ def _print_summary(output: dict) -> None:
         )
 
 
-def run_bridge(scan_report_path: Path, routed_skills_path: Path, output_path: Path) -> dict:
-    output = run_workflow(scan_report_path, routed_skills_path, output_path)
+def run_bridge(
+    scan_report_path: Path,
+    routed_skills_path: Path,
+    output_path: Path,
+    *,
+    runtime_config: RuntimeConfig | None = None,
+) -> dict:
+    started = time.perf_counter()
+    output = run_workflow(
+        scan_report_path,
+        routed_skills_path,
+        output_path,
+        runtime_config=runtime_config,
+    )
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    metrics = dict(output.get("metrics", {}))
+    runtime = dict(metrics.get("runtime", {}))
+    runtime["elapsedMs"] = elapsed_ms
+    metrics["runtime"] = runtime
+    output["metrics"] = metrics
+    write_json(output_path, output)
+    write_markdown_report(str(output_path), output)
     _print_summary(output)
     return output

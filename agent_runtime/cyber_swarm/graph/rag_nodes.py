@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from cyber_swarm.graph.state import GraphState
-from cyber_swarm.models.retrieval import RetrievedContext, RetrievalQuery
+from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.rag.loop import (
     MAX_RETRIEVAL_ITERATIONS,
     finalize_context,
@@ -127,7 +127,11 @@ def rewrite_query_node(state: GraphState) -> GraphState:
 
 
 def finalize_context_node(state: GraphState) -> GraphState:
-    selected = finalize_context(state.get("retrieved_context", []))
+    runtime_config = state.get("runtime_config")
+    max_items = 8
+    if isinstance(runtime_config, RuntimeConfig):
+        max_items = runtime_config.max_selected_context
+    selected = finalize_context(state.get("retrieved_context", []), max_items=max_items)
 
     return {
         **state,

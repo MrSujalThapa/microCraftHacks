@@ -1,6 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+
+import { loadDotEnv } from "../config/env";
+import { assertProviderReady, resolveProvider } from "../config/provider";
+import type { SwarmProvider } from "../config/types";
 
 const DEFAULT_RUNTIME_ROOT = "agent_runtime";
 const DEFAULT_PYTHON_COMMAND = "python";
@@ -10,6 +14,8 @@ export interface AgentRunOptions {
   reportPath: string;
   routedSkillsPath?: string;
   outputPath?: string;
+  provider?: SwarmProvider;
+  model?: string;
   root?: string;
   pythonCommand?: string;
   runtimeRoot?: string;
@@ -20,6 +26,12 @@ export interface AgentRunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  provider: SwarmProvider;
+  model: string;
+  runtimeMetrics?: {
+    elapsedMs?: number;
+    providerCalls?: Array<Record<string, unknown>>;
+  };
 }
 
 export class AgentRuntimeError extends Error {
@@ -63,8 +75,31 @@ export function resolveAgentRuntimePaths(
   };
 }
 
+function readRuntimeMetrics(outputPath: string): AgentRunResult["runtimeMetrics"] {
+  try {
+    const payload = JSON.parse(readFileSync(outputPath, "utf8")) as {
+      metrics?: {
+        runtime?: {
+          elapsedMs?: number;
+          providerCalls?: Array<Record<string, unknown>>;
+        };
+      };
+    };
+    return payload.metrics?.runtime;
+  } catch {
+    return undefined;
+  }
+}
+
 export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
   const root = resolve(options.root ?? process.cwd());
+  loadDotEnv(root);
+  const resolvedProvider = resolveProvider(root, {
+    provider: options.provider,
+    model: options.model,
+  });
+  assertProviderReady(resolvedProvider);
+
   const pythonCommand = options.pythonCommand ?? DEFAULT_PYTHON_COMMAND;
   const paths = resolveAgentRuntimePaths(root, options);
 
@@ -90,6 +125,11 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
     );
   }
 
+  const spawnEnv = { ...process.env };
+  if (resolvedProvider.provider === "openai" && process.env.OPENAI_API_KEY) {
+    spawnEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  }
+
   const result = spawnSync(
     pythonCommand,
     [
@@ -101,10 +141,21 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
       paths.routedSkillsPath,
       "--output",
       paths.outputPath,
+      "--provider",
+      resolvedProvider.provider,
+      "--model",
+      resolvedProvider.model,
+      "--max-selected-context",
+      "8",
+      "--max-draft-findings",
+      "3",
+      "--call-timeout",
+      "60",
     ],
     {
       cwd: paths.runtimeRoot,
       encoding: "utf8",
+      env: spawnEnv,
     },
   );
 
@@ -135,5 +186,8 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
     exitCode,
     stdout,
     stderr,
+    provider: resolvedProvider.provider,
+    model: resolvedProvider.model,
+    runtimeMetrics: readRuntimeMetrics(paths.outputPath),
   };
 }

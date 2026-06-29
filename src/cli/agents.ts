@@ -5,6 +5,8 @@ export function runAgentsRunCommand(options: {
   report: string;
   routedSkills?: string;
   output?: string;
+  provider?: "openai" | "mock" | "local";
+  model?: string;
 }): void {
   try {
     runAgentsCommand(options);

@@ -89,9 +89,19 @@ agentsCommand
   .requiredOption("--report <path>", "Path to scan report JSON")
   .option("--routed-skills <path>", "Path to routed skills JSON")
   .option("--output <path>", "Path to write findings output JSON")
-  .action((options: { report: string; routedSkills?: string; output?: string }) => {
-    runAgentsRunCommand(options);
-  });
+  .option("--provider <name>", "Model provider: openai, mock, or local")
+  .option("--model <name>", "Model name when using an LLM provider")
+  .action(
+    (options: {
+      report: string;
+      routedSkills?: string;
+      output?: string;
+      provider?: "openai" | "mock" | "local";
+      model?: string;
+    }) => {
+      runAgentsRunCommand(options);
+    },
+  );
 
 program
   .command("findings")
