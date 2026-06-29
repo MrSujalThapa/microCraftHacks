@@ -202,6 +202,9 @@ def report_stub(state: GraphState) -> GraphState:
         asdict(item)
         for item in state.get("needs_evidence_findings", [])
     ]
+    ranking_metrics = state.get("metrics", {}).get("risk_ranking", {})
+    verifier_metrics = state.get("metrics", {}).get("verifier", {})
+    dedup_metrics = state.get("metrics", {}).get("dedup", {})
 
     output = build_output(
         scan_report,
@@ -221,6 +224,7 @@ def report_stub(state: GraphState) -> GraphState:
                 "specialist_agents",
                 "verifier",
                 "dedup",
+                "rank",
                 "report_stub",
             ],
             "retrieval": {
@@ -243,6 +247,14 @@ def report_stub(state: GraphState) -> GraphState:
                         if isinstance(item, RejectedFindingDraft)
                     ],
                 },
+            },
+            "summary": {
+                "verifiedCount": len(state.get("verified_findings", [])),
+                "rejectedCount": len(agent_rejected) + len(verifier_rejected),
+                "needsEvidenceCount": len(needs_evidence),
+                "severityCounts": ranking_metrics.get("severityCounts", {}),
+                "verifier": verifier_metrics,
+                "dedup": dedup_metrics,
             },
         },
         verified_findings=state.get("verified_findings", []),

@@ -7,6 +7,7 @@ from typing import Any
 from cyber_swarm.graph.state import GraphState
 from cyber_swarm.models.agents import AgentFindingDraft, RejectedFindingDraft
 from cyber_swarm.verifier.dedup import dedupe_verified_findings
+from cyber_swarm.verifier.ranking import rank_verified_findings, severity_counts
 from cyber_swarm.verifier.verify import verify_drafts
 
 
@@ -86,6 +87,30 @@ def dedup_node(state: GraphState) -> GraphState:
                 "inputCount": len(verified),
                 "outputCount": len(deduped),
                 "mergedCount": merged_count,
+            },
+        ),
+    }
+
+
+def rank_node(state: GraphState) -> GraphState:
+    verified = [
+        item
+        for item in state.get("verified_findings", [])
+        if hasattr(item, "vulnerability_class")
+    ]
+    ranked = rank_verified_findings(verified)
+    counts = severity_counts(ranked)
+
+    return {
+        **state,
+        "verified_findings": ranked,
+        "metrics": _merge_metrics(
+            state,
+            "risk_ranking",
+            {
+                "status": "completed",
+                "findingCount": len(ranked),
+                "severityCounts": counts,
             },
         ),
     }
