@@ -2,11 +2,11 @@
 
 import { Command } from "commander";
 
-import { loadConfig } from "../config/load";
 import { runDoctor } from "./doctor";
 import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
+import { runSkillsCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
 const program = new Command();
@@ -42,20 +42,17 @@ program
     }
   });
 
-program
+const skillsCommand = program
   .command("skills")
-  .description("Manage the security skills library (not implemented yet)")
-  .action(() => {
-    try {
-      loadConfig();
-    } catch (error) {
-      printCliError(error);
-      process.exitCode = 1;
-      return;
-    }
+  .description("Manage the external cybersecurity skills library");
 
-    console.error("swarm skills is not implemented yet.");
-    process.exitCode = 1;
+skillsCommand
+  .command("sync")
+  .description("Clone external skills repo and write skills lockfile")
+  .option("--repo <url>", "Override external skill repo URL")
+  .option("--ref <ref>", "Optional branch/tag/commit to pin")
+  .action((options: { repo?: string; ref?: string }) => {
+    runSkillsCommand(() => runSkillsSyncCommand(options));
   });
 
 program.parse(process.argv);

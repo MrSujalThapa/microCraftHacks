@@ -1,4 +1,5 @@
 import { ConfigError } from "../config/errors";
+import { SkillsError } from "../skills/errors";
 
 export function printCliError(error: unknown): void {
   if (error instanceof ConfigError) {
@@ -6,6 +7,11 @@ export function printCliError(error: unknown): void {
     if (error.code === "MISSING") {
       console.error("Run `swarm init` to create the default config and folders.");
     }
+    return;
+  }
+
+  if (error instanceof SkillsError) {
+    console.error(`Error: ${error.message}`);
     return;
   }
 
