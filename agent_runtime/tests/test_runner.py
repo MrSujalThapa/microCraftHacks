@@ -128,5 +128,6 @@ def test_run_workflow_executes_all_stages(tmp_path: Path):
         "attack_planner",
         "specialist_agents",
         "verifier",
+        "dedup",
         "report_stub",
     ]

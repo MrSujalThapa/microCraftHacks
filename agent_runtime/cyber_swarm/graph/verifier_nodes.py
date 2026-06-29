@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from cyber_swarm.graph.state import GraphState
 from cyber_swarm.models.agents import AgentFindingDraft, RejectedFindingDraft
+from cyber_swarm.verifier.dedup import dedupe_verified_findings
 from cyber_swarm.verifier.verify import verify_drafts
 
 
@@ -23,16 +23,6 @@ def _context_paths_from_state(state: GraphState) -> set[str]:
         if isinstance(source_path, str) and source_path:
             paths.add(source_path)
     return paths
-
-
-def _serialize_agent_rejection(item: RejectedFindingDraft) -> dict[str, Any]:
-    payload = asdict(item)
-    payload["source"] = "agent"
-    return payload
-
-
-def _serialize_verifier_rejection(item) -> dict[str, Any]:
-    return asdict(item)
 
 
 def verifier_node(state: GraphState) -> GraphState:
@@ -72,6 +62,30 @@ def verifier_node(state: GraphState) -> GraphState:
                 "rejectedCount": len(verifier_rejected),
                 "needsEvidenceCount": len(needs_evidence),
                 "agentRejectedCount": len(agent_rejected),
+            },
+        ),
+    }
+
+
+def dedup_node(state: GraphState) -> GraphState:
+    verified = [
+        item
+        for item in state.get("verified_findings", [])
+        if hasattr(item, "vulnerability_class")
+    ]
+    deduped, merged_count = dedupe_verified_findings(verified)
+
+    return {
+        **state,
+        "verified_findings": deduped,
+        "metrics": _merge_metrics(
+            state,
+            "dedup",
+            {
+                "status": "completed",
+                "inputCount": len(verified),
+                "outputCount": len(deduped),
+                "mergedCount": merged_count,
             },
         ),
     }

@@ -15,7 +15,7 @@ from cyber_swarm.graph.nodes import (
     load_input,
     report_stub,
 )
-from cyber_swarm.graph.verifier_nodes import verifier_node
+from cyber_swarm.graph.verifier_nodes import dedup_node, verifier_node
 from cyber_swarm.graph.rag_nodes import (
     finalize_context_node,
     grade_context_node,
@@ -40,6 +40,7 @@ def build_workflow():
     graph.add_node("attack_planner", attack_planner_node)
     graph.add_node("specialist_agents", specialist_agents_node)
     graph.add_node("verifier", verifier_node)
+    graph.add_node("dedup", dedup_node)
     graph.add_node("report_stub", report_stub)
 
     graph.add_edge(START, "load_input")
@@ -59,7 +60,8 @@ def build_workflow():
     graph.add_edge("recon_agent", "attack_planner")
     graph.add_edge("attack_planner", "specialist_agents")
     graph.add_edge("specialist_agents", "verifier")
-    graph.add_edge("verifier", "report_stub")
+    graph.add_edge("verifier", "dedup")
+    graph.add_edge("dedup", "report_stub")
     graph.add_edge("report_stub", END)
 
     return graph.compile()

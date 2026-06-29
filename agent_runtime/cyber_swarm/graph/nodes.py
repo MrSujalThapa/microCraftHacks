@@ -220,6 +220,7 @@ def report_stub(state: GraphState) -> GraphState:
                 "attack_planner",
                 "specialist_agents",
                 "verifier",
+                "dedup",
                 "report_stub",
             ],
             "retrieval": {
