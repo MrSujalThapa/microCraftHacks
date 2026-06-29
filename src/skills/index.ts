@@ -1,2 +1,5 @@
-/** Skills sync and routing — implemented in a later phase. */
-export {};
+export { SkillsError } from "./errors";
+export { buildSkillsIndex, readSkillsIndex, printSkillsList } from "./indexer";
+export { loadSkillBodies } from "./loader";
+export { routeSkills, routeSkillsFromReport, printRouteSummary } from "./router";
+export { syncSkills, readSkillsLockfile, resolveSkillsRoot } from "./sync";

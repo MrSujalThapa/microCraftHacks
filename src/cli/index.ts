@@ -2,11 +2,12 @@
 
 import { Command } from "commander";
 
-import { loadConfig } from "../config/load";
 import { runDoctor } from "./doctor";
 import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
+import { runAgentsRunCommand } from "./agents";
+import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
 const program = new Command();
@@ -42,20 +43,53 @@ program
     }
   });
 
-program
+const skillsCommand = program
   .command("skills")
-  .description("Manage the security skills library (not implemented yet)")
-  .action(() => {
-    try {
-      loadConfig();
-    } catch (error) {
-      printCliError(error);
-      process.exitCode = 1;
-      return;
-    }
+  .description("Manage the external cybersecurity skills library");
 
-    console.error("swarm skills is not implemented yet.");
-    process.exitCode = 1;
+skillsCommand
+  .command("sync")
+  .description("Clone external skills repo and write skills lockfile")
+  .option("--repo <url>", "Override external skill repo URL")
+  .option("--ref <ref>", "Optional branch/tag/commit to pin")
+  .action((options: { repo?: string; ref?: string }) => {
+    runSkillsCommand(() => runSkillsSyncCommand(options));
+  });
+
+skillsCommand
+  .command("index")
+  .description("Build skills index from external and local-approved SKILL.md frontmatter")
+  .action(() => {
+    runSkillsCommand(() => runSkillsIndexCommand());
+  });
+
+skillsCommand
+  .command("list")
+  .description("List indexed skills")
+  .action(() => {
+    runSkillsCommand(() => runSkillsListCommand());
+  });
+
+skillsCommand
+  .command("route")
+  .description("Route relevant skills from a scan report")
+  .requiredOption("--report <path>", "Path to scan report JSON")
+  .action((options: { report: string }) => {
+    runSkillsCommand(() => runSkillsRouteCommand(options.report));
+  });
+
+const agentsCommand = program
+  .command("agents")
+  .description("Run Python LangGraph agent runtime");
+
+agentsCommand
+  .command("run")
+  .description("Run agent runtime against scan and routed skill artifacts")
+  .requiredOption("--report <path>", "Path to scan report JSON")
+  .option("--routed-skills <path>", "Path to routed skills JSON")
+  .option("--output <path>", "Path to write findings output JSON")
+  .action((options: { report: string; routedSkills?: string; output?: string }) => {
+    runAgentsRunCommand(options);
   });
 
 program.parse(process.argv);

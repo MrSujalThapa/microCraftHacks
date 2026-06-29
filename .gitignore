@@ -45,6 +45,14 @@ docs/
 AGENTS.md
 agents.md
 
+# Python
+
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.egg-info/
+
 # OS / editor
 
 .DS_Store
