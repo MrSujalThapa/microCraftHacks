@@ -1,23 +1,36 @@
-import { existsSync } from "node:fs";
 import { arch, cwd, platform, version as nodeVersion } from "node:process";
 
+import { CONFIG_RELATIVE_PATH } from "../config/paths";
+import { getDoctorConfigStatus } from "../config/status";
 import { getPackageVersion } from "../shared/version";
 
+function formatFolderSummary(folders: { path: string; exists: boolean }[]): string {
+  if (folders.length === 0) {
+    return "n/a";
+  }
+
+  const missing = folders.filter((folder) => !folder.exists);
+  if (missing.length === 0) {
+    return "ok";
+  }
+
+  return `${missing.length} missing (${missing.map((folder) => folder.path).join(", ")})`;
+}
+
 export function runDoctor(): void {
-  const root = cwd();
+  const status = getDoctorConfigStatus();
+  const configLabel = status.valid
+    ? `${CONFIG_RELATIVE_PATH} (${status.message})`
+    : status.exists
+      ? `${CONFIG_RELATIVE_PATH} (${status.message})`
+      : `${CONFIG_RELATIVE_PATH} (${status.message})`;
 
   console.log("Cyber Swarm Doctor");
-  console.log("");
-  console.log(`Version:     ${getPackageVersion()}`);
-  console.log(`Node:        ${nodeVersion}`);
-  console.log(`Platform:    ${platform} (${arch})`);
-  console.log(`CWD:         ${root}`);
-  console.log(
-    `Config:      ${existsSync("swarm.config.json") ? "swarm.config.json found" : "swarm.config.json missing"}`,
-  );
-  console.log(
-    `Skills dir:  ${existsSync("skills/external") ? "skills/external present" : "skills/external missing"}`,
-  );
-  console.log("");
-  console.log("Environment looks usable for local development.");
+  console.log(`Version   ${getPackageVersion()}`);
+  console.log(`Node      ${nodeVersion}`);
+  console.log(`Platform  ${platform} (${arch})`);
+  console.log(`CWD       ${cwd()}`);
+  console.log(`Config    ${configLabel}`);
+  console.log(`Folders   ${formatFolderSummary(status.folders)}`);
+  console.log(`Execution ${status.execution ?? "n/a"}`);
 }
