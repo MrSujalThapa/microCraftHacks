@@ -7,7 +7,7 @@ import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
 import { runAgentsRunCommand } from "./agents";
-import { runFindingsExplainCommand, runFindingsListCommand } from "./findings";
+import { runFindingsExplainCommand, runFindingsFixCommand, runFindingsListCommand } from "./findings";
 import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
@@ -107,6 +107,14 @@ program
   .option("--report <path>", "Path to findings report JSON")
   .action((findingId: string, options: { report?: string }) => {
     runFindingsExplainCommand(findingId, options);
+  });
+
+program
+  .command("fix <finding-id>")
+  .description("Generate a concrete patch plan for a verified finding")
+  .option("--report <path>", "Path to findings report JSON")
+  .action((findingId: string, options: { report?: string }) => {
+    runFindingsFixCommand(findingId, options);
   });
 
 program.parse(process.argv);
