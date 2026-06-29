@@ -80,7 +80,7 @@ describe("findVerifiedFinding", () => {
   it("returns verified finding by id", () => {
     const report = sampleFindingsReport();
     const finding = findVerifiedFinding(report, "verified-draft-auth-1");
-    expect(finding.title).toContain("Auth boundary");
+    expect(finding.title).toContain("Missing auth guard");
   });
 
   it("rejects rejected finding ids with clear error", () => {

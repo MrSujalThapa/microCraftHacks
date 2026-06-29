@@ -16,6 +16,17 @@ from cyber_swarm.models.agents import (
     VerifierRejectedFinding,
 )
 from cyber_swarm.rag.redaction import redact_secrets
+from cyber_swarm.verifier.strict import (
+    affected_path_failures,
+    concrete_anchor_failures,
+    generic_evidence_failures,
+    hedge_language_failures,
+    is_valid_repo_file_path,
+    normalize_path,
+    reproduction_failures,
+    specific_issue_failures,
+    split_surfaces_and_files,
+)
 
 _STOPWORDS = frozenset(
     {
@@ -58,15 +69,11 @@ class VerificationResult:
     needs_evidence: NeedsMoreEvidenceFinding | None = None
 
 
-def _normalize_path(path: str) -> str:
-    return path.replace("\\", "/").strip().lower()
-
-
 def _inventory_paths(scan_report: dict) -> set[str]:
     inventory = scan_report.get("inventory", {})
     files = inventory.get("files", []) if isinstance(inventory, dict) else []
     return {
-        _normalize_path(item["path"])
+        normalize_path(item["path"])
         for item in files
         if isinstance(item, dict) and isinstance(item.get("path"), str)
     }
@@ -88,7 +95,7 @@ def _known_routes(scan_report: dict) -> set[str]:
 
 
 def _context_paths(context_paths: set[str]) -> set[str]:
-    return {_normalize_path(path) for path in context_paths}
+    return {normalize_path(path) for path in context_paths}
 
 
 def _claim_tokens(claim: str) -> set[str]:
@@ -154,10 +161,10 @@ def _surface_exists(
 
     file_hits = 0
     for item in draft.evidence:
-        if item.path and _normalize_path(item.path) in known:
+        if item.path and normalize_path(item.path) in known:
             file_hits += 1
     for path in draft.affected_surfaces:
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if normalized in known or path.strip().lower() in routes:
             file_hits += 1
 
@@ -188,27 +195,28 @@ def _placeholder_ranking() -> RankingRationale:
     )
 
 
-def _draft_to_verified(draft: AgentFindingDraft) -> VerifiedFinding:
-    files = sorted(
-        {
-            item.path
-            for item in draft.evidence
-            if item.path and item.type != "skill"
-        }
-        | {surface for surface in draft.affected_surfaces if "/" not in surface or surface.endswith((".ts", ".py", ".env", ".json", ".js"))}
-    )
+def _draft_to_verified(
+    draft: AgentFindingDraft,
+    inventory: set[str],
+    routes: set[str],
+) -> VerifiedFinding:
+    surfaces, files = split_surfaces_and_files(draft, inventory, routes)
+    confidence: str = draft.confidence
+    if confidence == "high" and not any(item.line_start is not None for item in draft.evidence):
+        confidence = "medium"
+
     return VerifiedFinding(
         id=f"verified-{draft.id}",
         title=draft.title,
         vulnerability_class=draft.vulnerability_class,
         claim=draft.claim,
-        affected_surfaces=list(draft.affected_surfaces),
+        affected_surfaces=surfaces,
         affected_files=files,
         evidence=list(draft.evidence),
         impact_hypothesis=draft.impact_hypothesis,
         attack_path=draft.attack_path,
         safe_reproduction=draft.safe_reproduction,
-        confidence=draft.confidence,
+        confidence=confidence,  # type: ignore[arg-type]
         severity="medium",
         ranking_rationale=_placeholder_ranking(),
         contributing_agents=[draft.agent_type],
@@ -240,6 +248,17 @@ def verify_draft(
     if vague:
         failed.extend(vague_missing)
 
+    failed.extend(hedge_language_failures(draft))
+    failed.extend(generic_evidence_failures(draft))
+    failed.extend(concrete_anchor_failures(draft))
+    failed.extend(specific_issue_failures(draft))
+    failed.extend(affected_path_failures(draft, inventory, routes))
+
+    surfaces, files = split_surfaces_and_files(draft, inventory, routes)
+    if not files:
+        failed.append("no valid repo file paths in affected files or evidence")
+    failed.extend(reproduction_failures(draft, files))
+
     repro_ok, repro_failures = _safe_reproduction_valid(draft)
     if not repro_ok:
         failed.extend(repro_failures)
@@ -267,6 +286,11 @@ def verify_draft(
     if skill_only:
         needs_more.append("only skill references; missing project file evidence")
 
+    for item in draft.evidence:
+        if item.path and not is_valid_repo_file_path(item.path, inventory | context):
+            if item.type != "skill":
+                failed.append(f"evidence path is not a valid repo file: {item.path}")
+
     if failed:
         return VerificationResult(
             status="rejected",
@@ -291,7 +315,7 @@ def verify_draft(
 
     return VerificationResult(
         status="verified",
-        verified=_draft_to_verified(draft),
+        verified=_draft_to_verified(draft, inventory, routes),
     )
 
 

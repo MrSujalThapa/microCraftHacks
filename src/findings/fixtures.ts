@@ -18,28 +18,30 @@ export function sampleFindingsReport(): FindingsReport {
     verifiedFindings: [
       {
         id: "verified-draft-auth-1",
-        title: "Auth boundary gap on login route",
+        title: "Missing auth guard on /api/login handler",
         vulnerability_class: "broken-access-control",
         claim:
-          "Static auth middleware evidence on login route handlers should enforce access control before sensitive API routes are reached.",
+          "The /api/login handler in src/auth.ts lacks requireAuth() enforcement before request processing.",
         affected_surfaces: ["/api/login"],
         affected_files: ["src/auth.ts"],
         evidence: [
           {
             type: "file",
-            explanation: "Auth middleware context on login route handler",
+            explanation:
+              "requireAuth() middleware in src/auth.ts is not invoked on the /api/login handler before request processing.",
             path: "src/auth.ts",
             route: "/api/login",
             line_start: 12,
             line_end: 28,
+            snippet: "export function requireAuth(req, res, next) { /* guard */ }",
           },
         ],
-        impact_hypothesis: "Missing auth checks could allow unauthorized API access.",
-        attack_path: "Review auth middleware coverage for protected routes.",
+        impact_hypothesis: "Unauthenticated requests can reach the login handler logic.",
+        attack_path: "Trace middleware registration for /api/login in src/auth.ts.",
         safe_reproduction: {
           mode: "static-proof",
-          steps: ["Inspect auth middleware in src/auth.ts without live requests."],
-          expected_result: "Document routes lacking auth enforcement.",
+          steps: ["Open src/auth.ts and trace middleware registration for /api/login."],
+          expected_result: "Guard invocation is absent on the login handler path.",
           safety_notes: ["No live exploit execution."],
         },
         confidence: "medium",

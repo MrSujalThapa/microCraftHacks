@@ -1,3 +1,4 @@
+import { assessEvidenceStrictness } from "./evidenceStrict";
 import type { VerifiedFinding } from "./types";
 
 interface FixTemplate {
@@ -9,50 +10,47 @@ interface FixTemplate {
 const FIX_TEMPLATES: Record<string, FixTemplate> = {
   "broken-access-control": {
     summary: "Enforce authentication and authorization before sensitive route handlers execute.",
-    changes: [
-      "Audit route handlers for missing auth middleware or guard checks.",
-      "Apply consistent auth middleware to all protected routes in affected files.",
-      "Add explicit role or scope checks where handlers mutate sensitive data.",
-      "Return 401/403 for unauthenticated or unauthorized requests instead of falling through.",
-    ],
+    changes: [],
     validation: [
-      "Review affected route files and confirm every protected endpoint invokes auth middleware.",
-      "Run static tests or route inventory checks to ensure no unprotected handlers remain.",
-      "Verify safe reproduction steps still pass after auth guards are added.",
+      "Confirm protected handlers invoke auth middleware or guards.",
+      "Run static route inventory checks for unprotected endpoints.",
     ],
   },
   "secret-exposure": {
     summary: "Remove secrets from source control and load credentials from environment or a secret manager.",
-    changes: [
-      "Remove credential-like values from tracked files and rotate exposed secrets.",
-      "Load secrets from environment variables or a managed secret store at runtime.",
-      "Add pre-commit or CI checks to block credential patterns in new commits.",
-      "Replace hard-coded keys with references to secure configuration.",
-    ],
+    changes: [],
     validation: [
       "Confirm affected files no longer contain credential-like literals.",
-      "Verify application reads secrets from environment or secret manager.",
-      "Run repository secret scan locally before committing.",
+      "Verify runtime reads secrets from environment or secret manager.",
     ],
   },
 };
 
-const DEFAULT_FIX_TEMPLATE: FixTemplate = {
-  summary: "Address the verified issue using evidence-backed, minimal changes in affected files.",
-  changes: [
-    "Review the cited evidence locations and confirm the vulnerable behavior.",
-    "Apply the smallest change that removes the unsafe behavior.",
-    "Add regression coverage or static checks to prevent recurrence.",
-  ],
-  validation: [
-    "Re-run the safe reproduction steps from the finding report.",
-    "Confirm affected routes or files no longer exhibit the reported behavior.",
-    "Review related files for the same vulnerability class.",
-  ],
-};
+export function formatFixRefusal(findingId: string, reasons: string[]): string {
+  const lines = [
+    `Cannot generate concrete patch plan: ${findingId}`,
+    "=".repeat(Math.max(40, findingId.length + 32)),
+    "",
+    "This finding is not evidence-strict enough for automated patch guidance.",
+    "",
+    "Reasons:",
+    ...reasons.map((reason) => `  - ${reason}`),
+    "",
+    "Provide concrete file-level evidence (path, line range, function/route name, and the",
+    "specific missing or incorrect check) before requesting a patch plan.",
+    "",
+    "Note: No files were modified.",
+  ];
+  return lines.join("\n");
+}
 
 export function formatFixPlan(finding: VerifiedFinding, reportPath: string): string {
-  const template = FIX_TEMPLATES[finding.vulnerability_class] ?? DEFAULT_FIX_TEMPLATE;
+  const strictness = assessEvidenceStrictness(finding);
+  if (!strictness.strict) {
+    return formatFixRefusal(finding.id, strictness.reasons);
+  }
+
+  const template = FIX_TEMPLATES[finding.vulnerability_class];
   const lines: string[] = [];
 
   lines.push(`Patch plan: ${finding.id}`);
@@ -63,40 +61,52 @@ export function formatFixPlan(finding: VerifiedFinding, reportPath: string): str
   lines.push(`Severity: ${finding.severity}  Confidence: ${finding.confidence}`);
   lines.push("");
   lines.push("Summary");
-  lines.push(template.summary);
+  lines.push(template?.summary ?? finding.claim);
   lines.push("");
-  lines.push("Affected files");
-  if (finding.affected_files.length === 0) {
-    lines.push("  - (none listed — inspect evidence paths below)");
+  lines.push("Affected surfaces");
+  if (finding.affected_surfaces.length === 0) {
+    lines.push("  - (none)");
   } else {
-    for (const file of finding.affected_files) {
-      lines.push(`  - ${file}`);
+    for (const surface of finding.affected_surfaces) {
+      lines.push(`  - ${surface}`);
     }
   }
   lines.push("");
-  lines.push("Likely fix locations");
-  const locations = collectFixLocations(finding);
-  for (const location of locations) {
+  lines.push("Affected files");
+  for (const file of finding.affected_files) {
+    lines.push(`  - ${file}`);
+  }
+  lines.push("");
+  lines.push("Concrete fix locations");
+  for (const location of collectFixLocations(finding)) {
     lines.push(`  - ${location}`);
   }
   lines.push("");
   lines.push("Recommended changes");
-  for (const [index, change] of template.changes.entries()) {
+  const changes = buildConcreteChanges(finding, template);
+  for (const [index, change] of changes.entries()) {
     lines.push(`  ${index + 1}. ${change}`);
   }
   lines.push("");
   lines.push("Evidence basis");
   for (const item of finding.evidence) {
-    const path = item.path ?? item.route ?? "unknown";
-    lines.push(`  - [${item.type}] ${path}: ${item.explanation}`);
+    const path = item.path ?? "unknown";
+    const range =
+      item.line_start != null
+        ? `:${item.line_start}${item.line_end != null ? `-${item.line_end}` : ""}`
+        : "";
+    lines.push(`  - [${item.type}] ${path}${range}: ${item.explanation}`);
   }
   lines.push("");
   lines.push("Validation steps");
-  for (const [index, step] of template.validation.entries()) {
+  const validation = template?.validation ?? [
+    "Re-run the safe reproduction steps from the finding report.",
+  ];
+  for (const [index, step] of validation.entries()) {
     lines.push(`  ${index + 1}. ${step}`);
   }
   if (finding.safe_reproduction.steps.length > 0) {
-    lines.push(`  ${template.validation.length + 1}. Safe reproduction (${finding.safe_reproduction.mode}):`);
+    lines.push(`  ${validation.length + 1}. Safe reproduction (${finding.safe_reproduction.mode}):`);
     for (const step of finding.safe_reproduction.steps) {
       lines.push(`     - ${step}`);
     }
@@ -105,6 +115,36 @@ export function formatFixPlan(finding: VerifiedFinding, reportPath: string): str
   lines.push("Note: Suggested patch plan only — no files were modified.");
 
   return lines.join("\n");
+}
+
+function buildConcreteChanges(
+  finding: VerifiedFinding,
+  template: FixTemplate | undefined,
+): string[] {
+  const changes: string[] = [];
+
+  for (const item of finding.evidence) {
+    if (!item.path) {
+      continue;
+    }
+    const location =
+      item.line_start != null
+        ? `${item.path}:${item.line_start}${item.line_end != null ? `-${item.line_end}` : ""}`
+        : item.path;
+    changes.push(`Patch ${location} — ${item.explanation}`);
+  }
+
+  if (changes.length === 0) {
+    for (const file of finding.affected_files) {
+      changes.push(`Review and patch ${file} to address: ${finding.claim}`);
+    }
+  }
+
+  if (template?.changes.length) {
+    changes.push(...template.changes);
+  }
+
+  return changes;
 }
 
 function collectFixLocations(finding: VerifiedFinding): string[] {
@@ -122,10 +162,6 @@ function collectFixLocations(finding: VerifiedFinding): string[] {
     }
     if (item.path) {
       locations.add(item.path);
-      continue;
-    }
-    if (item.route) {
-      locations.add(`route ${item.route}`);
     }
   }
 
@@ -133,10 +169,6 @@ function collectFixLocations(finding: VerifiedFinding): string[] {
     if (surface.startsWith("/")) {
       locations.add(`route ${surface}`);
     }
-  }
-
-  if (locations.size === 0) {
-    locations.add("(inspect evidence and affected surfaces)");
   }
 
   return [...locations];
