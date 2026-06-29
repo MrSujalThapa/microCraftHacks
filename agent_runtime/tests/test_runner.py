@@ -73,6 +73,9 @@ def test_run_bridge_writes_empty_findings(tmp_path: Path):
     assert output_path.exists()
     assert output["verifiedFindings"] == []
     assert isinstance(output["rejectedFindings"], list)
+    markdown_path = output_path.with_suffix(".md")
+    assert markdown_path.exists()
+    assert "# Cyber Swarm Findings Report" in markdown_path.read_text(encoding="utf-8")
     assert output["metrics"]["verifier"]["verifiedCount"] == 0
     assert output["status"] == "completed"
     assert output["metrics"]["graph"] == "langgraph"

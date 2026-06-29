@@ -8,6 +8,7 @@ from typing import Any
 
 from cyber_swarm.schemas.io import write_json
 from cyber_swarm.schemas.output import build_output
+from cyber_swarm.schemas.report_md import write_markdown_report
 from cyber_swarm.graph.state import GraphState
 from cyber_swarm.rag.loop import serialize_context
 from cyber_swarm.rag.normalize import normalize_runtime_input
@@ -263,9 +264,16 @@ def report_stub(state: GraphState) -> GraphState:
     )
 
     write_json(output_path, output)
+    markdown_path = write_markdown_report(str(output_path), output)
 
     return {
         **state,
         "output": output,
-        "metrics": output["metrics"],
+        "metrics": {
+            **output["metrics"],
+            "report": {
+                "jsonPath": str(output_path),
+                "markdownPath": markdown_path,
+            },
+        },
     }

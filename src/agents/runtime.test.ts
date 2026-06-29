@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { deriveFindingsMarkdownPath } from "../findings/load";
 import { deriveFindingsOutputPath, runAgentRuntime } from "./runtime";
 
 const tempRoots: string[] = [];
@@ -83,6 +84,12 @@ describe("runAgentRuntime", () => {
     };
     expect(payload.status).toBe("completed");
     expect(payload.verifiedFindings).toEqual([]);
+
+    const markdownPath = deriveFindingsMarkdownPath(result.outputPath);
+    expect(existsSync(markdownPath)).toBe(true);
+    const markdown = readFileSync(markdownPath, "utf8");
+    expect(markdown).toContain("# Cyber Swarm Findings Report");
+    expect(markdown).toContain("## Summary");
   });
 });
 
