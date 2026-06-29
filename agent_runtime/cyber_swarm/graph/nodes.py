@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cyber_swarm.schemas.io import write_json
-from cyber_swarm.schemas.output import build_empty_output
+from cyber_swarm.schemas.output import build_output
 from cyber_swarm.graph.state import GraphState
 from cyber_swarm.rag.loop import serialize_context
 from cyber_swarm.rag.normalize import normalize_runtime_input
@@ -187,7 +187,23 @@ def report_stub(state: GraphState) -> GraphState:
     scan_report_path = Path(state["scan_report_path"])
     output_path = Path(state["output_path"])
 
-    output = build_empty_output(
+    from cyber_swarm.models.agents import RejectedFindingDraft
+
+    agent_rejected = [
+        asdict(item) | {"source": "agent"}
+        for item in state.get("rejected_findings", [])
+        if isinstance(item, RejectedFindingDraft)
+    ]
+    verifier_rejected = [
+        asdict(item)
+        for item in state.get("verifier_rejected_findings", [])
+    ]
+    needs_evidence = [
+        asdict(item)
+        for item in state.get("needs_evidence_findings", [])
+    ]
+
+    output = build_output(
         scan_report,
         scan_report_path,
         metrics={
@@ -203,7 +219,7 @@ def report_stub(state: GraphState) -> GraphState:
                 "recon_agent",
                 "attack_planner",
                 "specialist_agents",
-                "verifier_stub",
+                "verifier",
                 "report_stub",
             ],
             "retrieval": {
@@ -223,10 +239,14 @@ def report_stub(state: GraphState) -> GraphState:
                     ],
                     "rejectedDrafts": [
                         asdict(item) for item in state.get("rejected_findings", [])
+                        if isinstance(item, RejectedFindingDraft)
                     ],
                 },
             },
         },
+        verified_findings=state.get("verified_findings", []),
+        rejected_findings=[*agent_rejected, *verifier_rejected],
+        needs_evidence_findings=needs_evidence,
     )
 
     write_json(output_path, output)

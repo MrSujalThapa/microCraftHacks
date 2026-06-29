@@ -20,6 +20,8 @@ class GraphState(TypedDict, total=False):
     draft_findings: list[Any]
     verified_findings: list[Any]
     rejected_findings: list[Any]
+    verifier_rejected_findings: list[Any]
+    needs_evidence_findings: list[Any]
     metrics: dict[str, Any]
     output: dict[str, Any]
     retrieval_queries: list[RetrievalQuery]

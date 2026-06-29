@@ -72,7 +72,8 @@ def test_run_bridge_writes_empty_findings(tmp_path: Path):
 
     assert output_path.exists()
     assert output["verifiedFindings"] == []
-    assert output["rejectedFindings"] == []
+    assert isinstance(output["rejectedFindings"], list)
+    assert output["metrics"]["verifier"]["verifiedCount"] == 0
     assert output["status"] == "completed"
     assert output["metrics"]["graph"] == "langgraph"
     assert output["metrics"]["load_input"]["normalized"] is True
@@ -126,6 +127,6 @@ def test_run_workflow_executes_all_stages(tmp_path: Path):
         "recon_agent",
         "attack_planner",
         "specialist_agents",
-        "verifier_stub",
+        "verifier",
         "report_stub",
     ]

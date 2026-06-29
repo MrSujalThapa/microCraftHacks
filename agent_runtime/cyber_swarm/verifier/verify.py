@@ -1,0 +1,317 @@
+"""Deterministic draft finding verification (no runtime probes, no LLM)."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from cyber_swarm.agents.specialists.base import is_vague_draft
+from cyber_swarm.models.agents import (
+    AgentFindingDraft,
+    EvidenceRef,
+    NeedsMoreEvidenceFinding,
+    RankingRationale,
+    VerifiedFinding,
+    VerificationStatus,
+    VerifierRejectedFinding,
+)
+from cyber_swarm.rag.redaction import redact_secrets
+
+_STOPWORDS = frozenset(
+    {
+        "that",
+        "this",
+        "with",
+        "from",
+        "have",
+        "should",
+        "before",
+        "after",
+        "into",
+        "without",
+        "static",
+        "evidence",
+        "shows",
+        "could",
+        "would",
+        "their",
+        "there",
+        "which",
+        "about",
+        "through",
+        "review",
+        "identify",
+        "missing",
+    }
+)
+
+_UNREDACTED_SECRET = re.compile(
+    r"(?i)(api[_-]?key|secret|password|token|private[_-]?key)\s*[:=]\s*\S+"
+)
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    status: VerificationStatus
+    verified: VerifiedFinding | None = None
+    rejected: VerifierRejectedFinding | None = None
+    needs_evidence: NeedsMoreEvidenceFinding | None = None
+
+
+def _normalize_path(path: str) -> str:
+    return path.replace("\\", "/").strip().lower()
+
+
+def _inventory_paths(scan_report: dict) -> set[str]:
+    inventory = scan_report.get("inventory", {})
+    files = inventory.get("files", []) if isinstance(inventory, dict) else []
+    return {
+        _normalize_path(item["path"])
+        for item in files
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+
+
+def _known_routes(scan_report: dict) -> set[str]:
+    surfaces = scan_report.get("surfaces", {})
+    if not isinstance(surfaces, dict):
+        return set()
+    routes: set[str] = set()
+    for key in ("routes", "api"):
+        items = surfaces.get(key, [])
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict) and isinstance(item.get("path"), str):
+                routes.add(item["path"].strip().lower())
+    return routes
+
+
+def _context_paths(context_paths: set[str]) -> set[str]:
+    return {_normalize_path(path) for path in context_paths}
+
+
+def _claim_tokens(claim: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]{4,}", claim.lower())
+    return {word for word in words if word not in _STOPWORDS}
+
+
+def _evidence_text(evidence: list[EvidenceRef]) -> str:
+    parts: list[str] = []
+    for item in evidence:
+        parts.append(item.explanation.lower())
+        if item.snippet:
+            parts.append(item.snippet.lower())
+        if item.path:
+            parts.append(item.path.lower())
+        if item.route:
+            parts.append(item.route.lower())
+    return " ".join(parts)
+
+
+def _claim_matches_evidence(claim: str, evidence: list[EvidenceRef]) -> tuple[bool, float]:
+    tokens = _claim_tokens(claim)
+    if not tokens:
+        return False, 0.0
+    haystack = _evidence_text(evidence)
+    if not haystack.strip():
+        return False, 0.0
+    matches = sum(1 for token in tokens if token in haystack)
+    ratio = matches / len(tokens)
+    return ratio >= 0.25, ratio
+
+
+def _secrets_redacted(evidence: list[EvidenceRef]) -> tuple[bool, list[str]]:
+    failures: list[str] = []
+    for item in evidence:
+        snippet = item.snippet or ""
+        if _UNREDACTED_SECRET.search(snippet):
+            failures.append(f"unredacted secret in evidence snippet: {item.path or item.type}")
+        redacted = redact_secrets(snippet)
+        if snippet != redacted and "[REDACTED]" not in snippet:
+            failures.append(f"secret value visible in evidence: {item.path or item.type}")
+    return len(failures) == 0, failures
+
+
+def _safe_reproduction_valid(draft: AgentFindingDraft) -> tuple[bool, list[str]]:
+    repro = draft.safe_reproduction
+    failures: list[str] = []
+    if not repro.steps:
+        failures.append("safe reproduction missing steps")
+    if not repro.expected_result.strip():
+        failures.append("safe reproduction missing expected result")
+    return len(failures) == 0, failures
+
+
+def _surface_exists(
+    draft: AgentFindingDraft,
+    inventory: set[str],
+    routes: set[str],
+    context: set[str],
+) -> tuple[bool, list[str]]:
+    failures: list[str] = []
+    known = inventory | context
+
+    file_hits = 0
+    for item in draft.evidence:
+        if item.path and _normalize_path(item.path) in known:
+            file_hits += 1
+    for path in draft.affected_surfaces:
+        normalized = _normalize_path(path)
+        if normalized in known or path.strip().lower() in routes:
+            file_hits += 1
+
+    route_hits = sum(
+        1
+        for surface in draft.affected_surfaces
+        if surface.strip().lower() in routes
+    )
+    for item in draft.evidence:
+        if item.route and item.route.strip().lower() in routes:
+            route_hits += 1
+
+    if file_hits == 0 and route_hits == 0:
+        failures.append("affected files/routes not found in scan inventory or context")
+    return len(failures) == 0, failures
+
+
+def _placeholder_ranking() -> RankingRationale:
+    return RankingRationale(
+        impact=0.0,
+        exploitability=0.0,
+        confidence=0.0,
+        surface_sensitivity=0.0,
+        verification_strength=0.0,
+        mock_destructive_potential=0.0,
+        total_score=0.0,
+        factors=["pending risk ranking"],
+    )
+
+
+def _draft_to_verified(draft: AgentFindingDraft) -> VerifiedFinding:
+    files = sorted(
+        {
+            item.path
+            for item in draft.evidence
+            if item.path and item.type != "skill"
+        }
+        | {surface for surface in draft.affected_surfaces if "/" not in surface or surface.endswith((".ts", ".py", ".env", ".json", ".js"))}
+    )
+    return VerifiedFinding(
+        id=f"verified-{draft.id}",
+        title=draft.title,
+        vulnerability_class=draft.vulnerability_class,
+        claim=draft.claim,
+        affected_surfaces=list(draft.affected_surfaces),
+        affected_files=files,
+        evidence=list(draft.evidence),
+        impact_hypothesis=draft.impact_hypothesis,
+        attack_path=draft.attack_path,
+        safe_reproduction=draft.safe_reproduction,
+        confidence=draft.confidence,
+        severity="medium",
+        ranking_rationale=_placeholder_ranking(),
+        contributing_agents=[draft.agent_type],
+        contributing_specialists=[draft.specialist],
+        selected_skills=list(draft.selected_skills),
+        retrieval_trace=list(draft.retrieval_trace),
+        source_draft_ids=[draft.id],
+    )
+
+
+def verify_draft(
+    draft: AgentFindingDraft,
+    scan_report: dict,
+    *,
+    context_paths: set[str] | None = None,
+) -> VerificationResult:
+    """Verify a single draft finding against scan evidence and safety rules."""
+    inventory = _inventory_paths(scan_report)
+    routes = _known_routes(scan_report)
+    context = _context_paths(context_paths or set())
+
+    failed: list[str] = []
+    needs_more: list[str] = []
+
+    if not draft.evidence:
+        failed.append("missing evidence refs")
+
+    vague, vague_missing = is_vague_draft(draft)
+    if vague:
+        failed.extend(vague_missing)
+
+    repro_ok, repro_failures = _safe_reproduction_valid(draft)
+    if not repro_ok:
+        failed.extend(repro_failures)
+
+    redacted_ok, redaction_failures = _secrets_redacted(draft.evidence)
+    if not redacted_ok:
+        failed.extend(redaction_failures)
+
+    surface_ok, surface_failures = _surface_exists(draft, inventory, routes, context)
+    if not surface_ok:
+        file_evidence = [item for item in draft.evidence if item.type == "file" and item.path]
+        if file_evidence:
+            needs_more.extend(surface_failures)
+        else:
+            failed.extend(surface_failures)
+
+    claim_ok, claim_ratio = _claim_matches_evidence(draft.claim, draft.evidence)
+    if not claim_ok:
+        if draft.evidence and claim_ratio > 0:
+            needs_more.append("claim only partially supported by evidence")
+        else:
+            failed.append("claim does not match evidence")
+
+    skill_only = draft.evidence and all(item.type == "skill" for item in draft.evidence)
+    if skill_only:
+        needs_more.append("only skill references; missing project file evidence")
+
+    if failed:
+        return VerificationResult(
+            status="rejected",
+            rejected=VerifierRejectedFinding(
+                draft_id=draft.id,
+                title=draft.title,
+                reason="; ".join(failed),
+                failed_checks=failed,
+            ),
+        )
+
+    if needs_more:
+        return VerificationResult(
+            status="needs_more_evidence",
+            needs_evidence=NeedsMoreEvidenceFinding(
+                draft_id=draft.id,
+                title=draft.title,
+                reason="; ".join(needs_more),
+                missing_evidence=needs_more,
+            ),
+        )
+
+    return VerificationResult(
+        status="verified",
+        verified=_draft_to_verified(draft),
+    )
+
+
+def verify_drafts(
+    drafts: list[AgentFindingDraft],
+    scan_report: dict,
+    *,
+    context_paths: set[str] | None = None,
+) -> tuple[list[VerifiedFinding], list[VerifierRejectedFinding], list[NeedsMoreEvidenceFinding]]:
+    verified: list[VerifiedFinding] = []
+    rejected: list[VerifierRejectedFinding] = []
+    needs_evidence: list[NeedsMoreEvidenceFinding] = []
+
+    for draft in drafts:
+        result = verify_draft(draft, scan_report, context_paths=context_paths)
+        if result.status == "verified" and result.verified is not None:
+            verified.append(result.verified)
+        elif result.status == "rejected" and result.rejected is not None:
+            rejected.append(result.rejected)
+        elif result.status == "needs_more_evidence" and result.needs_evidence is not None:
+            needs_evidence.append(result.needs_evidence)
+
+    return verified, rejected, needs_evidence
