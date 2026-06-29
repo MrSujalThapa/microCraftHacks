@@ -1,0 +1,1 @@
+export { getPackageVersion } from "./version";

@@ -1,0 +1,53 @@
+# Dependencies
+
+node_modules/
+.pnpm-store/
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env / secrets
+
+.env
+.env.*
+!.env.example
+
+# Build outputs
+
+dist/
+build/
+out/
+coverage/
+
+# Caches
+
+.cache/
+.turbo/
+.next/
+.swarm/cache/
+.swarm/tmp/
+
+# Local reports / generated output
+
+.swarm/reports/
+reports/
+
+# External/local skill repos
+
+skills/external/
+vendor/
+
+# Local docs and agent instructions
+
+docs/
+AGENTS.md
+agents.md
+
+# OS / editor
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
