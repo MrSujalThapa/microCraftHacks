@@ -1,7 +1,7 @@
 import { loadConfig, tryLoadConfig } from "./load";
 import { isOpenAiKeyPresent, loadDotEnv, readEnvModel, readEnvProvider } from "./env";
 import { ProviderError } from "./provider-errors";
-import type { SwarmProvider } from "./types";
+import type { ResolvedProvider, SwarmProvider } from "./types";
 
 const PROVIDERS = new Set<SwarmProvider>(["openai", "mock", "local"]);
 const DEFAULT_MODEL = "gpt-5-mini";
@@ -12,15 +12,7 @@ export interface ProviderOverrides {
   model?: string;
 }
 
-export interface ResolvedProvider {
-  provider: SwarmProvider;
-  model: string;
-  openaiKeyPresent: boolean;
-  sources: {
-    provider: "cli" | "config" | "env" | "default";
-    model: "cli" | "config" | "env" | "default";
-  };
-}
+export type { ResolvedProvider } from "./types";
 
 function parseProvider(value: string | undefined): SwarmProvider | undefined {
   if (!value) {

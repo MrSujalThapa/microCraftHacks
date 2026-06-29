@@ -12,6 +12,7 @@ export type {
   DoctorConfigStatus,
   FolderStatus,
   InitResult,
+  ResolvedProvider,
   RiskLevel,
   SkillsConfig,
   SwarmConfig,
