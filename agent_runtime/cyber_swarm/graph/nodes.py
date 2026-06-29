@@ -163,21 +163,20 @@ def specialist_stub(state: GraphState) -> GraphState:
 
 def verifier_stub(state: GraphState) -> GraphState:
     draft_findings = state.get("draft_findings", [])
+    rejected_findings = state.get("rejected_findings", [])
 
     return {
         **state,
         "verified_findings": [],
-        "rejected_findings": [],
         "metrics": _merge_metrics(
             state,
             "verifier_stub",
             {
                 "status": "completed",
                 "verifiedFindingCount": 0,
-                "rejectedFindingCount": 0,
-                "reviewedDraftCount": len(draft_findings)
-                if isinstance(draft_findings, list)
-                else 0,
+                "rejectedFindingCount": len(rejected_findings),
+                "reviewedDraftCount": len(draft_findings),
+                "note": "Draft findings retained for later verification phase",
             },
         ),
     }

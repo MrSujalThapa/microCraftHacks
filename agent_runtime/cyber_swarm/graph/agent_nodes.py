@@ -7,6 +7,7 @@ from typing import Any
 
 from cyber_swarm.agents.attack_planner import run_attack_planner
 from cyber_swarm.agents.recon import run_recon
+from cyber_swarm.agents.specialists.runner import run_specialists
 from cyber_swarm.graph.state import GraphState
 
 
@@ -62,6 +63,32 @@ def attack_planner_node(state: GraphState) -> GraphState:
                 "status": "completed",
                 "hypothesisCount": len(hypotheses),
                 "hypotheses": [asdict(item) for item in hypotheses],
+            },
+        ),
+    }
+
+
+def specialist_agents_node(state: GraphState) -> GraphState:
+    runtime_input = _get_runtime_input(state)
+    hypotheses = state.get("attack_hypotheses", [])
+    drafts, rejected = run_specialists(
+        runtime_input,
+        hypotheses,
+        state.get("selected_context", []),
+    )
+
+    return {
+        **state,
+        "draft_findings": drafts,
+        "rejected_findings": rejected,
+        "metrics": _merge_metrics(
+            state,
+            "specialist_agents",
+            {
+                "status": "completed",
+                "draftFindingCount": len(drafts),
+                "rejectedDraftCount": len(rejected),
+                "specialists": sorted({draft.specialist for draft in drafts}),
             },
         ),
     }
