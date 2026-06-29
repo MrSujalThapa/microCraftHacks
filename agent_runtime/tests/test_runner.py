@@ -120,6 +120,11 @@ def test_run_workflow_executes_all_stages(tmp_path: Path):
     assert output["metrics"]["stages"] == [
         "load_input",
         "recon_stub",
+        "plan_retrieval",
+        "retrieve_context",
+        "grade_context",
+        "rewrite_query",
+        "finalize_context",
         "specialist_stub",
         "verifier_stub",
         "report_stub",

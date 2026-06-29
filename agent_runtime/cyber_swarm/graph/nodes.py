@@ -8,6 +8,7 @@ from typing import Any
 from cyber_swarm.schemas.io import write_json
 from cyber_swarm.schemas.output import build_empty_output
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.rag.loop import serialize_context
 from cyber_swarm.rag.normalize import normalize_runtime_input
 
 
@@ -132,6 +133,7 @@ def recon_stub(state: GraphState) -> GraphState:
 def specialist_stub(state: GraphState) -> GraphState:
     routed_skills = state.get("routed_skills", {})
     selected = routed_skills.get("selected", [])
+    selected_context = state.get("selected_context", [])
     agent_types = sorted(
         {
             agent_type
@@ -152,6 +154,7 @@ def specialist_stub(state: GraphState) -> GraphState:
                 "status": "completed",
                 "draftFindingCount": 0,
                 "agentTypes": agent_types,
+                "selectedContextCount": len(selected_context),
             },
         ),
     }
@@ -193,10 +196,19 @@ def report_stub(state: GraphState) -> GraphState:
             "stages": [
                 "load_input",
                 "recon_stub",
+                "plan_retrieval",
+                "retrieve_context",
+                "grade_context",
+                "rewrite_query",
+                "finalize_context",
                 "specialist_stub",
                 "verifier_stub",
                 "report_stub",
             ],
+            "retrieval": {
+                "attempts": state.get("retrieval_attempts", []),
+                "selectedContext": serialize_context(state.get("selected_context", [])),
+            },
         },
     )
 
