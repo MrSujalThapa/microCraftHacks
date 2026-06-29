@@ -1,3 +1,4 @@
+import { FindingsError } from "../findings/errors";
 import { ConfigError } from "../config/errors";
 import { SkillsError } from "../skills/errors";
 
@@ -11,6 +12,11 @@ export function printCliError(error: unknown): void {
   }
 
   if (error instanceof SkillsError) {
+    console.error(`Error: ${error.message}`);
+    return;
+  }
+
+  if (error instanceof FindingsError) {
     console.error(`Error: ${error.message}`);
     return;
   }

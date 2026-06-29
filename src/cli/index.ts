@@ -7,6 +7,7 @@ import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
 import { runAgentsRunCommand } from "./agents";
+import { runFindingsExplainCommand, runFindingsListCommand } from "./findings";
 import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
@@ -90,6 +91,22 @@ agentsCommand
   .option("--output <path>", "Path to write findings output JSON")
   .action((options: { report: string; routedSkills?: string; output?: string }) => {
     runAgentsRunCommand(options);
+  });
+
+program
+  .command("findings")
+  .description("List verified findings from the latest findings report")
+  .option("--report <path>", "Path to findings report JSON")
+  .action((options: { report?: string }) => {
+    runFindingsListCommand(options);
+  });
+
+program
+  .command("explain <finding-id>")
+  .description("Explain a verified finding in detail")
+  .option("--report <path>", "Path to findings report JSON")
+  .action((findingId: string, options: { report?: string }) => {
+    runFindingsExplainCommand(findingId, options);
   });
 
 program.parse(process.argv);
