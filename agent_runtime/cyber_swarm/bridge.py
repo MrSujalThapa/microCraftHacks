@@ -13,6 +13,7 @@ from cyber_swarm.schemas.report_md import write_markdown_report
 
 def _print_summary(output: dict) -> None:
     metrics = output.get("metrics", {})
+    activation = metrics.get("activation", {})
     verifier = metrics.get("verifier", {})
     ranking = metrics.get("risk_ranking", {})
     runtime = metrics.get("runtime", {})
@@ -21,6 +22,18 @@ def _print_summary(output: dict) -> None:
     needs = output.get("needsMoreEvidenceFindings", [])
 
     print("Cyber Swarm findings summary")
+    if activation:
+        print("  Activation (skills are supplemental, not the execution plan):")
+        print(f"    skillsRouted: {activation.get('skillsRouted', 0)}")
+        print(f"    agentsPlanned: {activation.get('agentsPlanned', 0)}")
+        print(f"    agentsRun: {activation.get('agentsRun', 0)}")
+        agent_types = activation.get("agentTypes", [])
+        if isinstance(agent_types, list):
+            print(
+                f"    agentTypes: {', '.join(agent_types) if agent_types else 'none'}"
+            )
+        print(f"    findingsVerified: {activation.get('findingsVerified', len(verified))}")
+        print(f"    findingsRejected: {activation.get('findingsRejected', len(rejected))}")
     print(f"  Verified: {len(verified)}")
     print(f"  Rejected: {len(rejected)}")
     print(f"  Needs evidence: {len(needs)}")

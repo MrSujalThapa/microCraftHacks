@@ -120,6 +120,15 @@ def specialist_agents_node(state: GraphState) -> GraphState:
     runtime_input = _get_runtime_input(state)
     hypotheses = state.get("attack_hypotheses", [])
     runtime_config = _runtime_config(state)
+    from cyber_swarm.agents.specialists.runner import SPECIALISTS
+
+    invoked_specialists = sorted(
+        {
+            hypothesis.specialist
+            for hypothesis in hypotheses
+            if hypothesis.specialist in SPECIALISTS
+        }
+    )
     drafts, rejected = run_specialists(
         runtime_input,
         hypotheses,
@@ -139,6 +148,8 @@ def specialist_agents_node(state: GraphState) -> GraphState:
                 "draftFindingCount": len(drafts),
                 "rejectedDraftCount": len(rejected),
                 "specialists": sorted({draft.specialist for draft in drafts}),
+                "agentsRun": len(invoked_specialists),
+                "invokedSpecialists": invoked_specialists,
                 "maxDraftFindings": runtime_config.max_draft_findings,
             },
         ),

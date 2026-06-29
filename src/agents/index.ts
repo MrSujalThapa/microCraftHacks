@@ -1,7 +1,14 @@
 import { resolve } from "node:path";
 
 import { deriveFindingsMarkdownPath } from "../findings/load";
-import { deriveFindingsOutputPath, runAgentRuntime } from "./runtime";
+import { planAgentsFromScanReport } from "./planner";
+import { deriveFindingsOutputPath, resolveAgentRuntimePaths, runAgentRuntime } from "./runtime";
+import {
+  printActivationSummary,
+  readActivationSummary,
+  readRoutedSkillsCount,
+} from "./summary";
+import { readScanReport } from "../skills/router";
 
 export function runAgentsCommand(options: {
   report: string;
@@ -11,6 +18,23 @@ export function runAgentsCommand(options: {
   model?: string;
 }): void {
   const root = resolve(process.cwd());
+  const paths = resolveAgentRuntimePaths(root, {
+    reportPath: options.report,
+    routedSkillsPath: options.routedSkills,
+    outputPath: options.output,
+  });
+
+  const scanReport = readScanReport(paths.reportPath);
+  const plannedAgents = planAgentsFromScanReport(scanReport);
+  const skillsRouted = readRoutedSkillsCount(paths.routedSkillsPath);
+
+  console.log("Agent activation (from repo surfaces, not skill count):");
+  console.log(`  Planned agents: ${plannedAgents.length}`);
+  for (const agent of plannedAgents) {
+    console.log(`    ${agent.agentType} → ${agent.specialist} — ${agent.reasons[0] ?? "surface match"}`);
+  }
+  console.log(`  Routed skills (supplemental): ${skillsRouted}`);
+
   const result = runAgentRuntime({
     root,
     reportPath: options.report,
@@ -19,6 +43,8 @@ export function runAgentsCommand(options: {
     provider: options.provider,
     model: options.model,
   });
+
+  const activation = readActivationSummary(result.outputPath, skillsRouted);
 
   console.log("Agent runtime complete.");
   console.log(`Provider: ${result.provider}`);
@@ -36,6 +62,7 @@ export function runAgentsCommand(options: {
   }
   console.log(`Findings: ${result.outputPath}`);
   console.log(`Report: ${deriveFindingsMarkdownPath(result.outputPath)}`);
+  printActivationSummary(activation);
 }
 
 export { deriveFindingsOutputPath, runAgentRuntime };

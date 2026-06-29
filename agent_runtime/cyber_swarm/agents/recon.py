@@ -8,9 +8,77 @@ from cyber_swarm.models.retrieval import RetrievedContext
 from cyber_swarm.models.runtime import RuntimeInput
 from cyber_swarm.rag.categories import is_test_path
 
+DEPENDENCY_MANIFESTS = {
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "requirements.txt",
+    "pyproject.toml",
+    "go.mod",
+    "cargo.toml",
+    "composer.json",
+}
+
+AI_TOKENS = ("openai", "anthropic", "langchain", "llm", "gpt", "claude", "embedding")
+STORAGE_TOKENS = ("supabase", "s3", "storage", "blob", "upload", "bucket")
+
 
 def _production_context(context: list[RetrievedContext]) -> list[RetrievedContext]:
     return [item for item in context if item.context_category != "test" or not item.is_supporting]
+
+
+def _has_web_api_auth_surfaces(repo: RepoIntelligence) -> bool:
+    auth_files = [auth.file for auth in repo.surfaces.auth if not is_test_path(auth.file)]
+    api_routes = [
+        route
+        for route in [*repo.surfaces.api, *repo.surfaces.routes]
+        if not is_test_path(route.file)
+    ]
+    return bool(auth_files or api_routes)
+
+
+def _dependency_files(repo: RepoIntelligence) -> list[str]:
+    files: list[str] = []
+    for item in repo.inventory.files:
+        if is_test_path(item.path):
+            continue
+        basename = item.path.rsplit("/", 1)[-1].lower()
+        if basename in DEPENDENCY_MANIFESTS:
+            files.append(item.path)
+    return files
+
+
+def _storage_signals(repo: RepoIntelligence) -> list[str]:
+    signals: list[str] = []
+    for stack in repo.stack:
+        lower = stack.name.lower()
+        if any(token in lower for token in STORAGE_TOKENS):
+            signals.append(f"stack: {stack.name}")
+    for route in [*repo.surfaces.api, *repo.surfaces.routes]:
+        if is_test_path(route.file):
+            continue
+        lower = route.path.lower()
+        if any(token in lower for token in STORAGE_TOKENS):
+            signals.append(f"storage route: {route.path}")
+    return signals
+
+
+def _ai_signals(repo: RepoIntelligence) -> list[str]:
+    signals: list[str] = []
+    for stack in repo.stack:
+        corpus = f"{stack.name} {' '.join(stack.evidence)}".lower()
+        if any(token in corpus for token in AI_TOKENS):
+            signals.append(f"stack: {stack.name}")
+    for item in repo.inventory.files:
+        if is_test_path(item.path):
+            continue
+        lower = item.path.lower()
+        if "__pycache__" in lower or lower.endswith(".pyc"):
+            continue
+        if any(token in lower for token in AI_TOKENS):
+            signals.append(f"ai-related path: {item.path}")
+    return signals
 
 
 def run_recon(runtime_input: RuntimeInput, selected_context: list[RetrievedContext]) -> ReconReport:
@@ -62,6 +130,40 @@ def run_recon(runtime_input: RuntimeInput, selected_context: list[RetrievedConte
         )
         targets.add("secrets")
 
+    dependency_files = _dependency_files(repo)
+    if dependency_files:
+        trust_boundaries.append(
+            TrustBoundary(
+                boundary_type="dependency",
+                description="Package and dependency manifest boundary",
+                files=dependency_files[:8],
+            )
+        )
+        targets.add("dependency")
+
+    storage_signals = _storage_signals(repo)
+    if storage_signals:
+        trust_boundaries.append(
+            TrustBoundary(
+                boundary_type="storage",
+                description="Object storage and upload boundary",
+                files=[],
+                routes=storage_signals[:8],
+            )
+        )
+        targets.add("storage")
+
+    ai_signals = _ai_signals(repo)
+    if ai_signals:
+        trust_boundaries.append(
+            TrustBoundary(
+                boundary_type="ai",
+                description="AI/LLM integration and prompt boundary",
+                files=[signal for signal in ai_signals if signal.startswith("ai-related")][:8],
+            )
+        )
+        targets.add("ai")
+
     if repo.surfaces.data_models:
         model_files = [model.file for model in repo.surfaces.data_models if not is_test_path(model.file)]
         trust_boundaries.append(
@@ -108,6 +210,10 @@ def run_recon(runtime_input: RuntimeInput, selected_context: list[RetrievedConte
                 )
             )
             targets.add("secrets")
+
+    if not _has_web_api_auth_surfaces(repo):
+        targets.clear()
+        targets.update({"secrets", "dependency", "config"})
 
     if not targets:
         targets.update({"recon", "api"})

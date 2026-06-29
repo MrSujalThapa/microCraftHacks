@@ -30,6 +30,19 @@ def _collect_surface_terms(runtime_input: RuntimeInput) -> list[str]:
 
 
 def _default_agent_type(runtime_input: RuntimeInput) -> str:
+    repo = runtime_input.repo
+    auth_files = [auth.file for auth in repo.surfaces.auth]
+    api_routes = [*repo.surfaces.api, *repo.surfaces.routes]
+    if auth_files:
+        return "auth"
+    if api_routes:
+        return "api"
+    for item in repo.inventory.files:
+        lower = item.path.lower()
+        if any(token in lower for token in (".env", "config", "secret", "settings")):
+            return "secrets"
+        if lower.endswith("package.json") or lower.endswith("requirements.txt"):
+            return "dependency"
     for skill in runtime_input.routed_skills.selected:
         if skill.agent_types:
             return skill.agent_types[0]

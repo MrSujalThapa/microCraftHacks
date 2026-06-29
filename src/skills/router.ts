@@ -729,7 +729,8 @@ export function routeSkillsFromReport(
 }
 
 export function printRouteSummary(output: RoutedSkillsOutput, outputPath: string): void {
-  console.log(`Routed skills: ${output.selected.length}`);
+  console.log(`Routed skills (playbooks, not agents): ${output.selected.length}`);
+  console.log(`  skillsRouted: ${output.selected.length}`);
   for (const skill of output.selected.slice(0, 10)) {
     const reason = skill.reasons[0] ?? "matched repo signals";
     console.log(`  ${skill.name} (${skill.score}) — ${reason}`);

@@ -33,8 +33,14 @@ export function printInventorySummary(inventory: ScanReport["inventory"]): void 
   }
 }
 
-export function runScan(root: string, config: SwarmConfig): ScanResult {
+export interface RunScanOptions {
+  /** Where to write `.swarm/reports` (defaults to scanned target root). */
+  outputRoot?: string;
+}
+
+export function runScan(root: string, config: SwarmConfig, options: RunScanOptions = {}): ScanResult {
   const projectRoot = resolve(root);
+  const outputRoot = resolve(options.outputRoot ?? projectRoot);
   const scannedAt = new Date().toISOString();
   const inventory = walkRepo(projectRoot);
   const stack = detectStack(projectRoot, inventory);
@@ -49,7 +55,7 @@ export function runScan(root: string, config: SwarmConfig): ScanResult {
     surfaces,
   };
 
-  const reportPath = writeScanReport(projectRoot, report, config.outputDir);
+  const reportPath = writeScanReport(outputRoot, report, config.outputDir);
 
   return { report, reportPath };
 }

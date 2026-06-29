@@ -206,12 +206,36 @@ def report_stub(state: GraphState) -> GraphState:
     ranking_metrics = state.get("metrics", {}).get("risk_ranking", {})
     verifier_metrics = state.get("metrics", {}).get("verifier", {})
     dedup_metrics = state.get("metrics", {}).get("dedup", {})
+    load_input_metrics = state.get("metrics", {}).get("load_input", {})
+    recon_metrics = state.get("metrics", {}).get("recon_agent", {})
+    specialist_metrics = state.get("metrics", {}).get("specialist_agents", {})
+    attack_hypotheses = state.get("attack_hypotheses", [])
+
+    agent_types = sorted(
+        {
+            hypothesis.agent_type
+            for hypothesis in attack_hypotheses
+            if hasattr(hypothesis, "agent_type")
+        }
+    )
+    activation = {
+        "skillsRouted": load_input_metrics.get("routedSkillCount", 0),
+        "agentsPlanned": len(attack_hypotheses),
+        "agentsRun": specialist_metrics.get(
+            "agentsRun",
+            len(specialist_metrics.get("invokedSpecialists", [])),
+        ),
+        "agentTypes": agent_types or recon_metrics.get("selectedAgentTargets", []),
+        "findingsVerified": len(state.get("verified_findings", [])),
+        "findingsRejected": len(agent_rejected) + len(verifier_rejected),
+    }
 
     output = build_output(
         scan_report,
         scan_report_path,
         metrics={
             **state.get("metrics", {}),
+            "activation": activation,
             "graph": "langgraph",
             "stages": [
                 "load_input",

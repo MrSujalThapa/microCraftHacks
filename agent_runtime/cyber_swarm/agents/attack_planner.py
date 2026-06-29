@@ -10,6 +10,10 @@ SPECIALIST_BY_TARGET = {
     "auth": "auth-breaker",
     "api": "api-abuse",
     "secrets": "secrets-config",
+    "dependency": "secrets-config",
+    "storage": "api-abuse",
+    "ai": "secrets-config",
+    "config": "secrets-config",
 }
 
 
@@ -101,6 +105,95 @@ def run_attack_planner(
                     "redacted secret pattern in repository config",
                 ],
                 priority="high" if config_files else "medium",
+            )
+        )
+
+    if "dependency" in recon.selected_agent_targets:
+        dependency_files = []
+        for boundary in recon.trust_boundaries:
+            if boundary.boundary_type == "dependency":
+                dependency_files.extend(boundary.files)
+        hypotheses.append(
+            AttackHypothesis(
+                id="hyp-dependency-1",
+                agent_type="dependency",
+                specialist="secrets-config",
+                title="Dependency or supply-chain misconfiguration",
+                vulnerability_class="security-misconfiguration",
+                target_surfaces=[],
+                target_files=sorted(set(dependency_files) & context_paths) or dependency_files[:4],
+                reasoning="Dependency manifests were mapped during recon.",
+                required_evidence=[
+                    "package manifest with risky dependency patterns",
+                    "lockfile or dependency configuration",
+                ],
+                priority="medium",
+            )
+        )
+
+    if "storage" in recon.selected_agent_targets:
+        storage_routes = []
+        for boundary in recon.trust_boundaries:
+            if boundary.boundary_type == "storage":
+                storage_routes.extend(boundary.routes)
+        hypotheses.append(
+            AttackHypothesis(
+                id="hyp-storage-1",
+                agent_type="storage",
+                specialist="api-abuse",
+                title="Storage or upload endpoint abuse",
+                vulnerability_class="api-abuse",
+                target_surfaces=storage_routes[:8],
+                target_files=sorted(context_paths)[:3],
+                reasoning="Storage-related routes or stack signals were mapped during recon.",
+                required_evidence=[
+                    "storage/upload route handler",
+                    "access control around object storage",
+                ],
+                priority="medium",
+            )
+        )
+
+    if "ai" in recon.selected_agent_targets:
+        ai_files = []
+        for boundary in recon.trust_boundaries:
+            if boundary.boundary_type == "ai":
+                ai_files.extend(boundary.files)
+        hypotheses.append(
+            AttackHypothesis(
+                id="hyp-ai-1",
+                agent_type="ai",
+                specialist="secrets-config",
+                title="AI integration secrets or unsafe prompt handling",
+                vulnerability_class="secret-exposure",
+                target_surfaces=[],
+                target_files=sorted(set(ai_files) & context_paths) or ai_files[:4],
+                reasoning="AI/LLM integration signals were mapped during recon.",
+                required_evidence=[
+                    "AI provider configuration",
+                    "prompt or model integration source",
+                ],
+                priority="medium",
+            )
+        )
+
+    if "config" in recon.selected_agent_targets and not any(h.agent_type == "secrets" for h in hypotheses):
+        config_files = []
+        for boundary in recon.trust_boundaries:
+            if boundary.boundary_type == "secrets-config":
+                config_files.extend(boundary.files)
+        hypotheses.append(
+            AttackHypothesis(
+                id="hyp-config-1",
+                agent_type="config",
+                specialist="secrets-config",
+                title="Configuration hardening review",
+                vulnerability_class="security-misconfiguration",
+                target_surfaces=[],
+                target_files=sorted(set(config_files) & context_paths) or config_files[:4],
+                reasoning="Config-only repo mapped for configuration review.",
+                required_evidence=["project configuration files"],
+                priority="medium",
             )
         )
 
