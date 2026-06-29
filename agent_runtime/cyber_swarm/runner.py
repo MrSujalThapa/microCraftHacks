@@ -59,6 +59,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=60.0,
         help="Timeout in seconds for each model call",
     )
+    parser.add_argument(
+        "--mode",
+        default="full",
+        choices=["full", "demo", "fast"],
+        help="Runtime mode: demo/fast caps model calls and specialists for live demos",
+    )
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help="Reuse cached findings when scan report hash matches",
+    )
     return parser
 
 
@@ -87,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         max_selected_context=args.max_selected_context,
         max_draft_findings=args.max_draft_findings,
         call_timeout_seconds=args.call_timeout,
+        mode=args.mode,
+        from_cache=args.from_cache,
     )
     run_bridge(args.scan_report, args.routed_skills, args.output, runtime_config=runtime_config)
     return 0

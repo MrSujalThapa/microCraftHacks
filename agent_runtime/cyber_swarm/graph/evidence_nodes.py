@@ -9,6 +9,8 @@ from typing import Any
 from cyber_swarm.evidence.prompt import format_packs_for_prompt
 from cyber_swarm.evidence.packs import build_evidence_packs
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.models.runtime_config import RuntimeConfig
+from cyber_swarm.verifier.demo_quality import is_public_route
 
 
 def _merge_metrics(state: GraphState, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -33,7 +35,27 @@ def build_evidence_packs_node(state: GraphState) -> GraphState:
 
     project_root = Path(runtime_input.repo.project_root)
     context_paths = _context_paths(state)
-    packs = build_evidence_packs(project_root, runtime_input.repo, context_paths)
+    runtime_config = state.get("runtime_config")
+    if not isinstance(runtime_config, RuntimeConfig):
+        runtime_config = RuntimeConfig()
+
+    max_packs = 48
+    if runtime_config.is_demo:
+        max_packs = 12
+
+    packs = build_evidence_packs(
+        project_root,
+        runtime_input.repo,
+        context_paths,
+        max_packs=max_packs,
+    )
+
+    if runtime_config.is_demo:
+        packs = [
+            pack
+            for pack in packs
+            if not (pack.route and is_public_route(pack.route))
+        ]
 
     return {
         **state,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from cyber_swarm.rag.redaction import redact_secrets
 
 
 def derive_markdown_path(json_path: str) -> str:
@@ -37,7 +37,7 @@ def _format_evidence(evidence: list[dict[str, Any]]) -> list[str]:
                 path = f"{path}{suffix}"
             location_parts.append(path)
         location = " @ ".join(location_parts) if location_parts else "unknown"
-        explanation = item.get("explanation", "")
+        explanation = redact_secrets(str(item.get("explanation", "")))
         evidence_type = item.get("type", "evidence")
         lines.append(f"- **[{evidence_type}]** {location} — {explanation}")
     return lines
@@ -74,10 +74,12 @@ def _format_verified_finding(index: int, finding: dict[str, Any]) -> list[str]:
         f"- **Severity:** {finding.get('severity', 'unknown')}  "
         f"**Confidence:** {finding.get('confidence', 'unknown')}",
         f"- **Class:** `{finding.get('vulnerability_class', 'unknown')}`",
+        f"- **Demo ready:** {'yes' if finding.get('demo_ready') else 'no'}"
+        + (f" — {finding.get('demo_reason')}" if finding.get('demo_reason') else ""),
         "",
         "**Claim**",
         "",
-        str(finding.get("claim", "")),
+        redact_secrets(str(finding.get("claim", ""))),
         "",
         "**Impact**",
         "",

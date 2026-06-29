@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { assessEvidenceStrictness } from "./evidenceStrict";
+import { assessEvidenceStrictness, isValidRepoFilePath } from "./evidenceStrict";
 import type { VerifiedFinding } from "./types";
 import { sampleFindingsReport } from "./fixtures";
 import { formatFixPlan, formatFixRefusal } from "./fix";
 import { findVerifiedFinding } from "./load";
 
 describe("assessEvidenceStrictness", () => {
+  it("accepts backend/.env as a valid repo path", () => {
+    expect(isValidRepoFilePath("backend/.env")).toBe(true);
+  });
+
   it("accepts concrete verified finding fixtures", () => {
     const report = sampleFindingsReport();
     const finding = report.verifiedFindings[0]!;
@@ -86,6 +90,44 @@ describe("formatFixPlan", () => {
     expect(output).toContain("Cannot generate concrete patch plan");
     expect(output).toContain("not evidence-strict");
     expect(output).not.toContain("Review the cited evidence");
+  });
+
+  it("generates secret-exposure remediation steps", () => {
+    const secretFinding: VerifiedFinding = {
+      ...sampleFindingsReport().verifiedFindings[0]!,
+      id: "verified-secret-1",
+      title: "Committed secret in backend/.env",
+      vulnerability_class: "secret-exposure",
+      claim: "backend/.env exposed SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET> in committed source control.",
+      affected_surfaces: ["backend/.env"],
+      affected_files: ["backend/.env"],
+      evidence: [
+        {
+          type: "file",
+          explanation: "backend/.env contains SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>.",
+          path: "backend/.env",
+          line_start: 1,
+          line_end: 1,
+          snippet: "SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>",
+          evidence_pack_id: "ep-secret",
+        },
+      ],
+      safe_reproduction: {
+        mode: "static-proof",
+        steps: ["Open backend/.env and confirm the service role key line."],
+        expected_result: "Secret key line is present in tracked file.",
+        safety_notes: [],
+      },
+      demo_ready: true,
+      demo_reason: "Verified secret exposure with redacted evidence",
+    };
+
+    const output = formatFixPlan(secretFinding, "report.json");
+    expect(output).toContain("backend/.env");
+    expect(output).not.toContain("super-secret");
+    expect(output).toContain(".gitignore");
+    expect(output).toContain(".env.example");
+    expect(output).toContain("Rotate");
   });
 
   it("uses access-control validation for broken-access-control class", () => {

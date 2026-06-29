@@ -83,6 +83,7 @@ def run_workflow(
     output_path: Path,
     *,
     runtime_config: RuntimeConfig | None = None,
+    scan_hash: str | None = None,
 ) -> dict:
     config = runtime_config or RuntimeConfig()
     provider: AgentProvider = create_provider(
@@ -108,6 +109,7 @@ def run_workflow(
             "retrieval_iteration": 0,
             "retrieval_sufficient": False,
             "attack_hypotheses": [],
+            "model_calls_used": 0,
         }
     )
     output = final_state.get("output")
@@ -118,11 +120,18 @@ def run_workflow(
     runtime_metrics: dict[str, Any] = {
         "provider": config.provider,
         "model": config.model,
-        "maxSelectedContext": config.max_selected_context,
-        "maxDraftFindings": config.max_draft_findings,
+        "mode": config.mode,
+        "maxSelectedContext": config.effective_max_selected_context(),
+        "maxDraftFindings": config.effective_max_draft_findings(),
+        "maxModelCalls": config.effective_max_model_calls(),
+        "maxSpecialists": config.effective_max_specialists(),
         "callTimeoutSeconds": config.call_timeout_seconds,
         "providerCalls": provider.call_log(),
         "stages": provider_metrics,
+        "cache": {
+            "scanHash": scan_hash,
+            "hit": False,
+        },
     }
     output_metrics = dict(output.get("metrics", {}))
     output_metrics["runtime"] = runtime_metrics

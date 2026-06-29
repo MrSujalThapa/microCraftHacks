@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from cyber_swarm.agents.specialists.base import is_vague_draft
 from cyber_swarm.models.agents import (
@@ -17,7 +17,9 @@ from cyber_swarm.models.agents import (
 )
 from cyber_swarm.evidence.models import EvidencePack
 from cyber_swarm.evidence.packs import packs_by_id
-from cyber_swarm.rag.redaction import redact_secrets
+from cyber_swarm.rag.redaction import contains_raw_secret, redact_secrets
+from cyber_swarm.rag.output_redaction import redact_evidence_ref
+from cyber_swarm.verifier.demo_quality import public_route_verification_failures
 from cyber_swarm.verifier.strict import (
     affected_path_failures,
     concrete_anchor_failures,
@@ -59,8 +61,25 @@ _STOPWORDS = frozenset(
 )
 
 _UNREDACTED_SECRET = re.compile(
-    r"(?i)(api[_-]?key|secret|password|token|private[_-]?key)\s*[:=]\s*\S+"
+    r"(?i)(api[_-]?key|secret|password|token|private[_-]?key)\s*[:=]\s*(?!<?REDACTED_SECRET>?)\S+"
 )
+
+
+def _redact_draft_evidence(draft: AgentFindingDraft) -> AgentFindingDraft:
+    return replace(
+        draft,
+        title=redact_secrets(draft.title),
+        claim=redact_secrets(draft.claim),
+        impact_hypothesis=redact_secrets(draft.impact_hypothesis),
+        attack_path=redact_secrets(draft.attack_path),
+        evidence=[redact_evidence_ref(item) for item in draft.evidence],
+        safe_reproduction=replace(
+            draft.safe_reproduction,
+            steps=[redact_secrets(step) for step in draft.safe_reproduction.steps],
+            expected_result=redact_secrets(draft.safe_reproduction.expected_result),
+            safety_notes=[redact_secrets(note) for note in draft.safe_reproduction.safety_notes],
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -133,12 +152,12 @@ def _claim_matches_evidence(claim: str, evidence: list[EvidenceRef]) -> tuple[bo
 def _secrets_redacted(evidence: list[EvidenceRef]) -> tuple[bool, list[str]]:
     failures: list[str] = []
     for item in evidence:
-        snippet = item.snippet or ""
-        if _UNREDACTED_SECRET.search(snippet):
-            failures.append(f"unredacted secret in evidence snippet: {item.path or item.type}")
-        redacted = redact_secrets(snippet)
-        if snippet != redacted and "[REDACTED]" not in snippet:
-            failures.append(f"secret value visible in evidence: {item.path or item.type}")
+        for field_name, value in (
+            ("snippet", item.snippet or ""),
+            ("explanation", item.explanation or ""),
+        ):
+            if contains_raw_secret(value):
+                failures.append(f"unredacted secret in evidence {field_name}: {item.path or item.type}")
     return len(failures) == 0, failures
 
 
@@ -251,9 +270,13 @@ def _evidence_pack_failures(
         if item.line_end is not None and item.line_end != pack.line_end:
             failures.append(f"evidence line_end mismatch for pack {item.evidence_pack_id}")
         if item.snippet and pack.snippet:
-            item_snippet = item.snippet.strip()
-            pack_snippet = pack.snippet.strip()
-            if item_snippet != pack_snippet and item_snippet not in pack_snippet and pack_snippet not in item_snippet:
+            item_snippet = redact_secrets(item.snippet.strip())
+            pack_snippet = redact_secrets(pack.snippet.strip())
+            if (
+                item_snippet != pack_snippet
+                and item_snippet not in pack_snippet
+                and pack_snippet not in item_snippet
+            ):
                 failures.append(f"evidence snippet mismatch for pack {item.evidence_pack_id}")
 
     return failures
@@ -267,6 +290,7 @@ def verify_draft(
     evidence_packs: list[EvidencePack] | None = None,
 ) -> VerificationResult:
     """Verify a single draft finding against scan evidence and safety rules."""
+    draft = _redact_draft_evidence(draft)
     inventory = _inventory_paths(scan_report)
     routes = _known_routes(scan_report)
     context = _context_paths(context_paths or set())
@@ -288,6 +312,7 @@ def verify_draft(
     failed.extend(specific_issue_failures(draft))
     failed.extend(affected_path_failures(draft, inventory, routes))
     failed.extend(_evidence_pack_failures(draft, pack_index))
+    failed.extend(public_route_verification_failures(draft))
 
     surfaces, files = split_surfaces_and_files(draft, inventory, routes)
     if not files:
@@ -353,6 +378,12 @@ def verify_draft(
         status="verified",
         verified=_draft_to_verified(draft, inventory, routes),
     )
+
+
+def redact_verified_finding(finding: VerifiedFinding) -> VerifiedFinding:
+    from cyber_swarm.rag.output_redaction import redact_verified_finding as _redact
+
+    return _redact(finding)
 
 
 def verify_drafts(

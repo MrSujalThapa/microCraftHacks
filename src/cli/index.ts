@@ -91,6 +91,9 @@ agentsCommand
   .option("--output <path>", "Path to write findings output JSON")
   .option("--provider <name>", "Model provider: openai, mock, or local")
   .option("--model <name>", "Model name when using an LLM provider")
+  .option("--mode <name>", "Runtime mode: full, demo, or fast")
+  .option("--fast", "Alias for --mode demo")
+  .option("--from-cache", "Reuse cached findings when scan report hash matches")
   .action(
     (options: {
       report: string;
@@ -98,8 +101,15 @@ agentsCommand
       output?: string;
       provider?: "openai" | "mock" | "local";
       model?: string;
+      mode?: string;
+      fast?: boolean;
+      fromCache?: boolean;
     }) => {
-      runAgentsRunCommand(options);
+      runAgentsRunCommand({
+        ...options,
+        mode: options.fast ? "demo" : options.mode,
+        fromCache: options.fromCache,
+      });
     },
   );
 
@@ -107,7 +117,8 @@ program
   .command("findings")
   .description("List verified findings from the latest findings report")
   .option("--report <path>", "Path to findings report JSON")
-  .action((options: { report?: string }) => {
+  .option("--demo", "Show only demo-ready verified findings")
+  .action((options: { report?: string; demo?: boolean }) => {
     runFindingsListCommand(options);
   });
 

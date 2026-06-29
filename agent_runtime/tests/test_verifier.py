@@ -201,21 +201,33 @@ def test_verify_rejects_review_only_evidence():
     assert any("review" in check.lower() for check in result.rejected.failed_checks)
 
 
-def test_verify_rejects_unredacted_secrets():
+def test_verify_redacts_unredacted_secrets_in_evidence():
     draft = _supported_draft()
+    secret_snippet = "API_KEY=live-secret-value-that-should-not-appear"
+    pack = replace(_supported_pack(), snippet=secret_snippet)
     leaked = replace(
         draft.evidence[0],
-        snippet="API_KEY=live-secret-value-that-should-not-appear",
+        snippet=secret_snippet,
+        explanation="API_KEY in src/auth.ts is hardcoded instead of loaded from environment.",
+        evidence_pack_id=pack.id,
+    )
+    secret_draft = replace(
+        draft,
+        claim="src/auth.ts exposes API_KEY hardcoded in source instead of environment configuration.",
+        evidence=[leaked],
     )
     result = verify_draft(
-        replace(draft, evidence=[leaked]),
+        secret_draft,
         _scan_report(),
         context_paths={"src/auth.ts"},
-        evidence_packs=[_supported_pack()],
+        evidence_packs=[pack],
     )
 
-    assert result.status == "rejected"
-    assert any("secret" in check.lower() for check in result.rejected.failed_checks)  # type: ignore[union-attr]
+    assert result.status == "verified"
+    assert result.verified is not None
+    snippet = result.verified.evidence[0].snippet or ""
+    assert "live-secret-value-that-should-not-appear" not in snippet
+    assert "<REDACTED_SECRET>" in snippet
 
 
 def test_specialist_auth_draft_is_rejected_without_concrete_evidence():

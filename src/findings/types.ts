@@ -62,6 +62,8 @@ export interface VerifiedFinding {
   selected_skills: string[];
   retrieval_trace: string[];
   source_draft_ids: string[];
+  demo_ready?: boolean;
+  demo_reason?: string;
 }
 
 export interface RejectedFinding {
@@ -87,6 +89,7 @@ export interface FindingsReport {
       rejectedCount?: number;
       needsEvidenceCount?: number;
       severityCounts?: Partial<Record<Severity, number>>;
+      demoReadyCount?: number;
     };
     [key: string]: unknown;
   };

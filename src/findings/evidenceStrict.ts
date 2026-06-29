@@ -11,7 +11,8 @@ const CODE_ELEMENT =
 
 const ABSTRACT_SURFACE = /<->|<|>|frontend|backend|trust boundary|service boundary/i;
 
-const VALID_PATH = /^(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|py|json|yaml|yml|toml|md)$|^\.env[\w.-]*$/i;
+const VALID_PATH = /^(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|py|json|yaml|yml|toml|md)$/i;
+const ENV_FILE = /(?:^|\/)\.env[\w.-]*$/i;
 
 const ISSUE_MARKERS =
   /\b(missing| lacks |without |not enforced|not validated|unauthenticated|no auth|no validation|fails to|does not |absent |bypass|exposed|hardcoded|omit|skipped|never calls)\b/i;
@@ -33,6 +34,9 @@ export function isValidRepoFilePath(path: string, inventory?: Set<string>): bool
   if (normalized.startsWith(".env")) {
     return true;
   }
+  if (ENV_FILE.test(normalized)) {
+    return true;
+  }
   if (VALID_PATH.test(normalized)) {
     return true;
   }
@@ -51,7 +55,10 @@ export function assessEvidenceStrictness(finding: VerifiedFinding): EvidenceStri
   if (HEDGE_LANGUAGE.test(finding.title) || HEDGE_LANGUAGE.test(finding.claim)) {
     reasons.push("claim or title uses non-conclusive language");
   }
-  if (!ISSUE_MARKERS.test(finding.claim)) {
+  if (
+    finding.vulnerability_class !== "secret-exposure" &&
+    !ISSUE_MARKERS.test(finding.claim)
+  ) {
     const symbols = finding.evidence.flatMap((item) => {
       const matches: string[] = [];
       const snippet = item.snippet ?? "";

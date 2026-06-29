@@ -46,6 +46,7 @@ _VALID_PATH = re.compile(
     r"^(?:[\w.-]+/)+[\w.-]+\.(?:ts|tsx|js|jsx|py|json|yaml|yml|toml|md)$|^\.env[\w.-]*$",
     re.IGNORECASE,
 )
+_ENV_FILE = re.compile(r"(?:^|/)\.env[\w.-]*$", re.IGNORECASE)
 
 _ISSUE_MARKERS = re.compile(
     r"(?i)("
@@ -68,6 +69,8 @@ def is_valid_repo_file_path(path: str, inventory: set[str]) -> bool:
     if normalized in inventory:
         return True
     if normalized.startswith(".env"):
+        return True
+    if _ENV_FILE.search(normalized):
         return True
     if _VALID_PATH.match(normalized):
         return True

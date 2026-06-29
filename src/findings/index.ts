@@ -10,13 +10,13 @@ import {
 import { formatFindingExplanation, formatFindingsTable, formatRejectedExplanation } from "./display";
 import { formatFixPlan } from "./fix";
 
-export function runFindingsCommand(options: { report?: string } = {}): void {
+export function runFindingsCommand(options: { report?: string; demo?: boolean } = {}): void {
   const root = resolve(process.cwd());
   const config = loadConfig(root);
   const reportPath = resolveFindingsReportPath(config.outputDir, options.report);
   const report = loadFindingsReport(reportPath);
 
-  console.log(formatFindingsTable(report, reportPath));
+  console.log(formatFindingsTable(report, reportPath, { demoOnly: options.demo }));
 }
 
 export function runExplainCommand(findingId: string, options: { report?: string } = {}): void {

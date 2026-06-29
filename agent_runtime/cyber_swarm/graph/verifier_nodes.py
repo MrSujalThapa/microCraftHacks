@@ -9,7 +9,7 @@ from cyber_swarm.graph.state import GraphState
 from cyber_swarm.models.agents import AgentFindingDraft, RejectedFindingDraft
 from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.verifier.dedup import dedupe_verified_findings
-from cyber_swarm.verifier.ranking import rank_verified_findings, severity_counts
+from cyber_swarm.verifier.ranking import rank_verified_findings, severity_counts, _SEVERITY_ORDER
 from cyber_swarm.verifier.verify import verify_drafts
 
 
@@ -43,12 +43,17 @@ def verifier_node(state: GraphState) -> GraphState:
     provider_metrics = dict(state.get("provider_metrics", {}))
 
     model_review: dict[str, Any] | None = None
-    if runtime_config.provider == "openai" and provider is not None:
+    allow_verifier_model = (
+        runtime_config.provider == "openai"
+        and provider is not None
+        and not runtime_config.is_demo
+    )
+    if allow_verifier_model:
         model_review = run_verifier_review_with_provider(
             provider,
             drafts,
             scan_report,
-            max_drafts=runtime_config.max_draft_findings,
+            max_drafts=runtime_config.effective_max_draft_findings(),
         )
         provider_metrics["verifier"] = model_review
 
@@ -124,18 +129,29 @@ def rank_node(state: GraphState) -> GraphState:
         if hasattr(item, "vulnerability_class")
     ]
     ranked = rank_verified_findings(verified)
-    counts = severity_counts(ranked)
+    annotated = [annotate_demo_quality(item) for item in ranked]
+    annotated.sort(
+        key=lambda item: (
+            0 if item.demo_ready else 1,
+            -_SEVERITY_ORDER[item.severity],
+            -item.ranking_rationale.total_score,
+            item.title,
+        )
+    )
+    counts = severity_counts(annotated)
+    demo_ready_count = sum(1 for item in annotated if item.demo_ready)
 
     return {
         **state,
-        "verified_findings": ranked,
+        "verified_findings": annotated,
         "metrics": _merge_metrics(
             state,
             "risk_ranking",
             {
                 "status": "completed",
-                "findingCount": len(ranked),
+                "findingCount": len(annotated),
                 "severityCounts": counts,
+                "demoReadyCount": demo_ready_count,
             },
         ),
     }

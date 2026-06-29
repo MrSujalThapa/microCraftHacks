@@ -7,6 +7,11 @@ from pathlib import Path
 
 from cyber_swarm.graph.workflow import run_workflow
 from cyber_swarm.models.runtime_config import RuntimeConfig
+from cyber_swarm.schemas.cache import (
+    copy_cached_findings,
+    find_cached_findings,
+    scan_content_hash,
+)
 from cyber_swarm.schemas.io import write_json
 from cyber_swarm.schemas.report_md import write_markdown_report
 
@@ -42,8 +47,13 @@ def _print_summary(output: dict) -> None:
             "  Runtime: "
             f"provider={runtime.get('provider', 'unknown')} "
             f"model={runtime.get('model', 'unknown')} "
+            f"mode={runtime.get('mode', 'full')} "
             f"elapsedMs={runtime.get('elapsedMs', 'n/a')}"
         )
+        cache = runtime.get("cache", {})
+        if isinstance(cache, dict) and cache.get("scanHash"):
+            hit = cache.get("hit")
+            print(f"  Cache: {'hit' if hit else 'miss'}  scanHash={cache.get('scanHash')}")
         calls = runtime.get("providerCalls", [])
         if isinstance(calls, list) and calls:
             total_tokens = sum(
@@ -75,17 +85,46 @@ def run_bridge(
     *,
     runtime_config: RuntimeConfig | None = None,
 ) -> dict:
+    config = runtime_config or RuntimeConfig()
+    scan_hash = scan_content_hash(scan_report_path)
+
+    if config.from_cache:
+        cached = find_cached_findings(output_path.parent, scan_hash)
+        if cached is not None:
+            started = time.perf_counter()
+            output = copy_cached_findings(cached, output_path, scan_hash=scan_hash)
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+            metrics = dict(output.get("metrics", {}))
+            runtime = dict(metrics.get("runtime", {}))
+            runtime.update(
+                {
+                    "elapsedMs": elapsed_ms,
+                    "provider": config.provider,
+                    "model": config.model,
+                    "mode": config.mode,
+                    "cache": {"scanHash": scan_hash, "hit": True, "sourcePath": str(cached)},
+                }
+            )
+            metrics["runtime"] = runtime
+            output["metrics"] = metrics
+            write_json(output_path, output)
+            write_markdown_report(str(output_path), output)
+            _print_summary(output)
+            return output
+
     started = time.perf_counter()
     output = run_workflow(
         scan_report_path,
         routed_skills_path,
         output_path,
-        runtime_config=runtime_config,
+        runtime_config=config,
+        scan_hash=scan_hash,
     )
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     metrics = dict(output.get("metrics", {}))
     runtime = dict(metrics.get("runtime", {}))
     runtime["elapsedMs"] = elapsed_ms
+    runtime.setdefault("cache", {"scanHash": scan_hash, "hit": False})
     metrics["runtime"] = runtime
     output["metrics"] = metrics
     write_json(output_path, output)

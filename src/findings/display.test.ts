@@ -9,6 +9,7 @@ describe("formatFindingsTable", () => {
 
     expect(output).toContain("SEVERITY");
     expect(output).toContain("CONF");
+    expect(output).toContain("DEMO");
     expect(output).toContain("TITLE");
     expect(output).toContain("ROUTE/FILE");
     expect(output).toContain("ID");

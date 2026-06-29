@@ -1,21 +1,14 @@
-import type { EvidencePack, FindingsReport, RejectedFinding, Severity, VerifiedFinding } from "./types";
+import type { EvidencePack, FindingsReport, RejectedFinding, VerifiedFinding } from "./types";
+import { redactSecrets } from "../shared/redaction";
+import { filterDemoFindings, isDemoReady, sortFindingsForDisplay } from "./demoQuality";
 
-const SEVERITY_ORDER: Record<Severity, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-  info: 4,
-};
+export interface FindingsTableOptions {
+  demoOnly?: boolean;
+  includeRejected?: boolean;
+}
 
 export function sortVerifiedFindings(findings: VerifiedFinding[]): VerifiedFinding[] {
-  return [...findings].sort((left, right) => {
-    const severityDelta = SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity];
-    if (severityDelta !== 0) {
-      return severityDelta;
-    }
-    return right.ranking_rationale.total_score - left.ranking_rationale.total_score;
-  });
+  return sortFindingsForDisplay(findings);
 }
 
 export function formatAffectedTarget(finding: VerifiedFinding): string {
@@ -27,14 +20,24 @@ export function formatAffectedTarget(finding: VerifiedFinding): string {
   return route ?? file ?? "—";
 }
 
-export function formatFindingsTable(report: FindingsReport, reportPath: string): string {
+export function formatFindingsTable(
+  report: FindingsReport,
+  reportPath: string,
+  options: FindingsTableOptions = {},
+): string {
   const lines: string[] = [];
   const summary = report.metrics.summary;
   const verifiedCount = summary?.verifiedCount ?? report.verifiedFindings.length;
   const rejectedCount = summary?.rejectedCount ?? report.rejectedFindings.length;
+  const demoReadyCount =
+    typeof summary?.demoReadyCount === "number"
+      ? summary.demoReadyCount
+      : report.verifiedFindings.filter(isDemoReady).length;
 
   lines.push(`Findings report: ${reportPath}`);
-  lines.push(`Scan: ${report.scanId}  Verified: ${verifiedCount}  Rejected: ${rejectedCount}`);
+  lines.push(
+    `Scan: ${report.scanId}  Verified: ${verifiedCount}  Demo-ready: ${demoReadyCount}  Rejected: ${rejectedCount}`,
+  );
   lines.push("");
 
   if (report.verifiedFindings.length === 0) {
@@ -42,21 +45,32 @@ export function formatFindingsTable(report: FindingsReport, reportPath: string):
     return lines.join("\n");
   }
 
-  const rows = sortVerifiedFindings(report.verifiedFindings).map((finding) => ({
+  const findings = options.demoOnly
+    ? filterDemoFindings(report.verifiedFindings)
+    : sortVerifiedFindings(report.verifiedFindings);
+
+  if (findings.length === 0) {
+    lines.push("No demo-ready verified findings.");
+    return lines.join("\n");
+  }
+
+  const rows = findings.map((finding) => ({
     severity: finding.severity,
     confidence: finding.confidence,
-    title: truncate(finding.title, 36),
-    target: truncate(formatAffectedTarget(finding), 32),
+    demo: isDemoReady(finding) ? "yes" : "no",
+    title: truncate(finding.title, 32),
+    target: truncate(formatAffectedTarget(finding), 28),
     id: finding.id,
   }));
 
-  const headers = ["SEVERITY", "CONF", "TITLE", "ROUTE/FILE", "ID"];
+  const headers = ["SEVERITY", "CONF", "DEMO", "TITLE", "ROUTE/FILE", "ID"];
   const widths = [
     Math.max(headers[0]!.length, ...rows.map((row) => row.severity.length)),
     Math.max(headers[1]!.length, ...rows.map((row) => row.confidence.length)),
-    Math.max(headers[2]!.length, ...rows.map((row) => row.title.length)),
-    Math.max(headers[3]!.length, ...rows.map((row) => row.target.length)),
-    Math.max(headers[4]!.length, ...rows.map((row) => row.id.length)),
+    Math.max(headers[2]!.length, ...rows.map((row) => row.demo.length)),
+    Math.max(headers[3]!.length, ...rows.map((row) => row.title.length)),
+    Math.max(headers[4]!.length, ...rows.map((row) => row.target.length)),
+    Math.max(headers[5]!.length, ...rows.map((row) => row.id.length)),
   ];
 
   lines.push(formatRow(headers, widths));
@@ -64,10 +78,15 @@ export function formatFindingsTable(report: FindingsReport, reportPath: string):
   for (const row of rows) {
     lines.push(
       formatRow(
-        [row.severity, row.confidence, row.title, row.target, row.id],
+        [row.severity, row.confidence, row.demo, row.title, row.target, row.id],
         widths,
       ),
     );
+  }
+
+  if (options.includeRejected && report.rejectedFindings.length > 0) {
+    lines.push("");
+    lines.push(`Rejected findings: ${report.rejectedFindings.length}`);
   }
 
   return lines.join("\n");
@@ -79,18 +98,22 @@ export function formatFindingExplanation(
 ): string {
   const lines: string[] = [];
 
-  lines.push(`${finding.title} (${finding.id})`);
+  lines.push(`${redactSecrets(finding.title)} (${finding.id})`);
   lines.push(`Severity: ${finding.severity}  Confidence: ${finding.confidence}`);
   lines.push(`Class: ${finding.vulnerability_class}`);
+  lines.push(`Demo ready: ${isDemoReady(finding) ? "yes" : "no"}`);
+  if (finding.demo_reason) {
+    lines.push(`Demo reason: ${finding.demo_reason}`);
+  }
   lines.push("");
   lines.push("Claim");
-  lines.push(finding.claim);
+  lines.push(redactSecrets(finding.claim));
   lines.push("");
   lines.push("Impact");
-  lines.push(finding.impact_hypothesis);
+  lines.push(redactSecrets(finding.impact_hypothesis));
   lines.push("");
   lines.push("Attack path");
-  lines.push(finding.attack_path);
+  lines.push(redactSecrets(finding.attack_path));
   lines.push("");
   lines.push("Affected surfaces");
   for (const surface of finding.affected_surfaces) {
@@ -105,20 +128,20 @@ export function formatFindingExplanation(
   lines.push("Evidence");
   for (const item of finding.evidence) {
     const location = formatEvidenceLocation(item);
-    lines.push(`  - [${item.type}] ${location}: ${item.explanation}`);
+    lines.push(`  - [${item.type}] ${location}: ${redactSecrets(item.explanation)}`);
     appendEvidenceSnippet(lines, item, evidencePacks);
   }
   lines.push("");
   lines.push("Safe reproduction");
   lines.push(`  Mode: ${finding.safe_reproduction.mode}`);
   for (const step of finding.safe_reproduction.steps) {
-    lines.push(`  - ${step}`);
+    lines.push(`  - ${redactSecrets(step)}`);
   }
-  lines.push(`  Expected: ${finding.safe_reproduction.expected_result}`);
+  lines.push(`  Expected: ${redactSecrets(finding.safe_reproduction.expected_result)}`);
   if (finding.safe_reproduction.safety_notes.length > 0) {
     lines.push("  Safety notes:");
     for (const note of finding.safe_reproduction.safety_notes) {
-      lines.push(`    - ${note}`);
+      lines.push(`    - ${redactSecrets(note)}`);
     }
   }
   lines.push("");
@@ -145,9 +168,9 @@ export function formatRejectedExplanation(
 
   lines.push(`Rejected finding (${id})`);
   if (finding.title) {
-    lines.push(`Title: ${finding.title}`);
+    lines.push(`Title: ${redactSecrets(finding.title)}`);
   }
-  lines.push(`Reason: ${finding.reason}`);
+  lines.push(`Reason: ${redactSecrets(finding.reason)}`);
   lines.push("");
 
   if (finding.failed_checks?.length) {
@@ -170,7 +193,7 @@ export function formatRejectedExplanation(
     lines.push("Evidence");
     for (const item of finding.evidence) {
       const location = formatEvidenceLocation(item);
-      lines.push(`  - [${item.type}] ${location}: ${item.explanation}`);
+      lines.push(`  - [${item.type}] ${location}: ${redactSecrets(item.explanation)}`);
       appendEvidenceSnippet(lines, item, evidencePacks);
     }
   }
@@ -188,7 +211,7 @@ function appendEvidenceSnippet(
     return;
   }
   lines.push("    ```");
-  for (const line of snippet.split("\n")) {
+  for (const line of redactSecrets(snippet).split("\n")) {
     lines.push(`    ${line}`);
   }
   lines.push("    ```");

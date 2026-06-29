@@ -48,7 +48,12 @@ def recon_agent_node(state: GraphState) -> GraphState:
     provider = state.get("provider")
     provider_metrics = _provider_metrics(state)
 
-    if runtime_config.provider == "openai" and provider is not None:
+    allow_model = (
+        runtime_config.provider == "openai"
+        and provider is not None
+        and not runtime_config.is_demo
+    )
+    if allow_model:
         recon, stage_metrics = run_recon_with_provider(
             provider,
             runtime_input,
@@ -86,18 +91,23 @@ def attack_planner_node(state: GraphState) -> GraphState:
     provider = state.get("provider")
     provider_metrics = _provider_metrics(state)
     selected_context = state.get("selected_context", [])
+    max_hypotheses = runtime_config.effective_max_draft_findings()
 
-    if runtime_config.provider == "openai" and provider is not None:
+    allow_model = runtime_config.provider == "openai" and provider is not None
+    if runtime_config.is_demo:
+        allow_model = allow_model and runtime_config.effective_max_model_calls() >= 1
+
+    if allow_model:
         hypotheses, stage_metrics = run_attack_planner_with_provider(
             provider,
             runtime_input,
             recon,
             selected_context,
-            max_hypotheses=runtime_config.max_draft_findings,
+            max_hypotheses=max_hypotheses,
         )
         provider_metrics["attack_planner"] = stage_metrics
     else:
-        hypotheses = run_attack_planner(runtime_input, recon, selected_context)
+        hypotheses = run_attack_planner(runtime_input, recon, selected_context)[:max_hypotheses]
 
     return {
         **state,
@@ -122,6 +132,9 @@ def specialist_agents_node(state: GraphState) -> GraphState:
     runtime_config = _runtime_config(state)
     from cyber_swarm.agents.specialists.runner import SPECIALISTS
 
+    max_specialists = runtime_config.effective_max_specialists()
+    hypotheses = hypotheses[:max_specialists]
+
     invoked_specialists = sorted(
         {
             hypothesis.specialist
@@ -135,7 +148,7 @@ def specialist_agents_node(state: GraphState) -> GraphState:
         state.get("selected_context", []),
         state.get("evidence_packs", []),
     )
-    drafts = drafts[: runtime_config.max_draft_findings]
+    drafts = drafts[: runtime_config.effective_max_draft_findings()]
 
     return {
         **state,
@@ -151,7 +164,8 @@ def specialist_agents_node(state: GraphState) -> GraphState:
                 "specialists": sorted({draft.specialist for draft in drafts}),
                 "agentsRun": len(invoked_specialists),
                 "invokedSpecialists": invoked_specialists,
-                "maxDraftFindings": runtime_config.max_draft_findings,
+                "maxDraftFindings": runtime_config.effective_max_draft_findings(),
+                "maxSpecialists": max_specialists,
             },
         ),
     }

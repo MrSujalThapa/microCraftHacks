@@ -16,6 +16,8 @@ export function runAgentsCommand(options: {
   output?: string;
   provider?: "openai" | "mock" | "local";
   model?: string;
+  mode?: string;
+  fromCache?: boolean;
 }): void {
   const root = resolve(process.cwd());
   const paths = resolveAgentRuntimePaths(root, {
@@ -42,6 +44,8 @@ export function runAgentsCommand(options: {
     outputPath: options.output,
     provider: options.provider,
     model: options.model,
+    mode: options.mode ?? "full",
+    fromCache: options.fromCache,
   });
 
   const activation = readActivationSummary(result.outputPath, skillsRouted);
@@ -49,8 +53,15 @@ export function runAgentsCommand(options: {
   console.log("Agent runtime complete.");
   console.log(`Provider: ${result.provider}`);
   console.log(`Model: ${result.model}`);
+  if (result.runtimeMetrics?.mode) {
+    console.log(`Mode: ${result.runtimeMetrics.mode}`);
+  }
   if (result.runtimeMetrics?.elapsedMs != null) {
     console.log(`Elapsed: ${result.runtimeMetrics.elapsedMs} ms`);
+  }
+  const cache = result.runtimeMetrics?.cache;
+  if (cache?.scanHash) {
+    console.log(`Cache: ${cache.hit ? "hit" : "miss"}  scanHash=${cache.scanHash}`);
   }
   const calls = result.runtimeMetrics?.providerCalls ?? [];
   if (calls.length > 0) {

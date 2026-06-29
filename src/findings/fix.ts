@@ -1,5 +1,7 @@
 import { assessEvidenceStrictness } from "./evidenceStrict";
+import { isDemoReady } from "./demoQuality";
 import type { VerifiedFinding } from "./types";
+import { redactSecrets } from "../shared/redaction";
 
 interface FixTemplate {
   summary: string;
@@ -22,6 +24,9 @@ const FIX_TEMPLATES: Record<string, FixTemplate> = {
     validation: [
       "Confirm affected files no longer contain credential-like literals.",
       "Verify runtime reads secrets from environment or secret manager.",
+      "Rotate any exposed credentials at the provider.",
+      "Ensure .env is listed in .gitignore and never committed.",
+      "Keep .env.example with placeholder values only.",
     ],
   },
 };
@@ -60,12 +65,20 @@ export function formatFixPlan(
   lines.push(`Patch plan: ${finding.id}`);
   lines.push("=".repeat(Math.max(24, finding.id.length + 12)));
   lines.push(`Report: ${reportPath}`);
-  lines.push(`Title: ${finding.title}`);
+  lines.push(`Title: ${redactSecrets(finding.title)}`);
   lines.push(`Class: ${finding.vulnerability_class}`);
   lines.push(`Severity: ${finding.severity}  Confidence: ${finding.confidence}`);
+  lines.push(`Demo ready: ${isDemoReady(finding) ? "yes" : "no"}`);
+  if (!isDemoReady(finding)) {
+    lines.push("");
+    lines.push("Warning: This finding is not demo-ready. Review evidence before applying patches.");
+    if (finding.demo_reason) {
+      lines.push(`Reason: ${finding.demo_reason}`);
+    }
+  }
   lines.push("");
   lines.push("Summary");
-  lines.push(template?.summary ?? finding.claim);
+  lines.push(template?.summary ?? redactSecrets(finding.claim));
   lines.push("");
   lines.push("Affected surfaces");
   if (finding.affected_surfaces.length === 0) {
@@ -99,10 +112,10 @@ export function formatFixPlan(
       item.line_start != null
         ? `:${item.line_start}${item.line_end != null ? `-${item.line_end}` : ""}`
         : "";
-    lines.push(`  - [${item.type}] ${path}${range}: ${item.explanation}`);
+    lines.push(`  - [${item.type}] ${path}${range}: ${redactSecrets(item.explanation)}`);
     const snippet = resolveFixSnippet(item, evidencePacks);
     if (snippet) {
-      lines.push(`    snippet: ${snippet.split("\n")[0]}`);
+      lines.push(`    snippet: ${redactSecrets(snippet.split("\n")[0]!)}`);
     }
   }
   lines.push("");
@@ -116,7 +129,7 @@ export function formatFixPlan(
   if (finding.safe_reproduction.steps.length > 0) {
     lines.push(`  ${validation.length + 1}. Safe reproduction (${finding.safe_reproduction.mode}):`);
     for (const step of finding.safe_reproduction.steps) {
-      lines.push(`     - ${step}`);
+      lines.push(`     - ${redactSecrets(step)}`);
     }
   }
   lines.push("");
@@ -132,6 +145,15 @@ function buildConcreteChanges(
 ): string[] {
   const changes: string[] = [];
 
+  if (finding.vulnerability_class === "secret-exposure") {
+    for (const file of finding.affected_files) {
+      changes.push(`Remove committed secret values from ${file} and purge from git history if tracked.`);
+      changes.push(`Rotate any exposed credentials referenced in ${file}.`);
+      changes.push(`Keep ${file} local only and ensure it is listed in .gitignore.`);
+      changes.push("Maintain .env.example with placeholder values such as API_KEY=<REDACTED_SECRET>.");
+    }
+  }
+
   for (const item of finding.evidence) {
     if (!item.path) {
       continue;
@@ -142,13 +164,13 @@ function buildConcreteChanges(
         : item.path;
     const symbol = item.symbol ? ` (${item.symbol})` : "";
     const snippet = resolveFixSnippet(item, evidencePacks);
-    const snippetHint = snippet ? ` — see: ${snippet.split("\n")[0]}` : "";
-    changes.push(`Patch ${location}${symbol} — ${item.explanation}${snippetHint}`);
+    const snippetHint = snippet ? ` — see: ${redactSecrets(snippet.split("\n")[0]!)}` : "";
+    changes.push(`Patch ${location}${symbol} — ${redactSecrets(item.explanation)}${snippetHint}`);
   }
 
   if (changes.length === 0) {
     for (const file of finding.affected_files) {
-      changes.push(`Review and patch ${file} to address: ${finding.claim}`);
+      changes.push(`Review and patch ${file} to address: ${redactSecrets(finding.claim)}`);
     }
   }
 

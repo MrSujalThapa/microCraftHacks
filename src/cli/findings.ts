@@ -1,7 +1,7 @@
 import { printCliError } from "./errors";
 import { runExplainCommand, runFindingsCommand, runFixCommand } from "../findings";
 
-export function runFindingsListCommand(options: { report?: string }): void {
+export function runFindingsListCommand(options: { report?: string; demo?: boolean }): void {
   try {
     runFindingsCommand(options);
   } catch (error) {

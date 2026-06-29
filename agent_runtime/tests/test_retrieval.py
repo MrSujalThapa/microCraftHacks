@@ -84,4 +84,4 @@ def test_redact_secrets_masks_common_patterns():
     redacted = redact_secrets("api_key=super-secret-token sk-1234567890abcdef")
 
     assert "super-secret-token" not in redacted
-    assert "[REDACTED]" in redacted
+    assert "<REDACTED_SECRET>" in redacted

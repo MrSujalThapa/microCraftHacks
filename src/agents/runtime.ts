@@ -16,6 +16,8 @@ export interface AgentRunOptions {
   outputPath?: string;
   provider?: SwarmProvider;
   model?: string;
+  mode?: string;
+  fromCache?: boolean;
   root?: string;
   pythonCommand?: string;
   runtimeRoot?: string;
@@ -31,6 +33,11 @@ export interface AgentRunResult {
   runtimeMetrics?: {
     elapsedMs?: number;
     providerCalls?: Array<Record<string, unknown>>;
+    mode?: string;
+    cache?: {
+      scanHash?: string;
+      hit?: boolean;
+    };
   };
 }
 
@@ -82,6 +89,11 @@ function readRuntimeMetrics(outputPath: string): AgentRunResult["runtimeMetrics"
         runtime?: {
           elapsedMs?: number;
           providerCalls?: Array<Record<string, unknown>>;
+          mode?: string;
+          cache?: {
+            scanHash?: string;
+            hit?: boolean;
+          };
         };
       };
     };
@@ -130,6 +142,12 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
     spawnEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   }
 
+  const mode = options.mode ?? "full";
+  const fromCache = options.fromCache ?? false;
+  const demoMode = mode === "demo" || mode === "fast";
+  const maxSelectedContext = demoMode ? "4" : "8";
+  const maxDraftFindings = demoMode ? "2" : "3";
+
   const result = spawnSync(
     pythonCommand,
     [
@@ -146,11 +164,14 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
       "--model",
       resolvedProvider.model,
       "--max-selected-context",
-      "8",
+      maxSelectedContext,
       "--max-draft-findings",
-      "3",
+      maxDraftFindings,
       "--call-timeout",
       "60",
+      "--mode",
+      mode,
+      ...(fromCache ? ["--from-cache"] : []),
     ],
     {
       cwd: paths.runtimeRoot,

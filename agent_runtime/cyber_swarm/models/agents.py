@@ -126,6 +126,8 @@ class VerifiedFinding:
     selected_skills: list[str]
     retrieval_trace: list[str]
     source_draft_ids: list[str]
+    demo_ready: bool = False
+    demo_reason: str = ""
 
 
 @dataclass(frozen=True)

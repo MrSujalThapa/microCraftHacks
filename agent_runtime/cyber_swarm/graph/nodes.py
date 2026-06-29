@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cyber_swarm.schemas.io import write_json
+from cyber_swarm.rag.output_redaction import redact_output_payload
 from cyber_swarm.schemas.output import build_output
 from cyber_swarm.schemas.report_md import write_markdown_report
 from cyber_swarm.graph.state import GraphState
@@ -279,6 +280,7 @@ def report_stub(state: GraphState) -> GraphState:
                 "rejectedCount": len(agent_rejected) + len(verifier_rejected),
                 "needsEvidenceCount": len(needs_evidence),
                 "severityCounts": ranking_metrics.get("severityCounts", {}),
+                "demoReadyCount": ranking_metrics.get("demoReadyCount", 0),
                 "verifier": verifier_metrics,
                 "dedup": dedup_metrics,
             },
@@ -295,6 +297,7 @@ def report_stub(state: GraphState) -> GraphState:
         pack.to_dict() if isinstance(pack, EvidencePack) else pack for pack in evidence_packs
     ]
 
+    output = redact_output_payload(output)
     write_json(output_path, output)
     markdown_path = write_markdown_report(str(output_path), output)
 
