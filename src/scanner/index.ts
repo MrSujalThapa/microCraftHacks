@@ -5,9 +5,10 @@ import { writeScanReport } from "../report/write";
 import { getPackageVersion } from "../shared/version";
 import { walkRepo } from "./inventory";
 import { detectStack, printStackSummary } from "./stack";
+import { mapSurfaces, printSurfacesSummary } from "./surfaces";
 import type { ScanReport, ScanResult } from "./types";
 
-export { printStackSummary };
+export { printStackSummary, printSurfacesSummary };
 
 export function printInventorySummary(inventory: ScanReport["inventory"]): void {
   console.log(`Files: ${inventory.totalFiles}`);
@@ -37,6 +38,7 @@ export function runScan(root: string, config: SwarmConfig): ScanResult {
   const scannedAt = new Date().toISOString();
   const inventory = walkRepo(projectRoot);
   const stack = detectStack(projectRoot, inventory);
+  const surfaces = mapSurfaces(projectRoot, inventory);
 
   const report: ScanReport = {
     version: getPackageVersion(),
@@ -44,6 +46,7 @@ export function runScan(root: string, config: SwarmConfig): ScanResult {
     projectRoot,
     inventory,
     stack,
+    surfaces,
   };
 
   const reportPath = writeScanReport(projectRoot, report, config.outputDir);
