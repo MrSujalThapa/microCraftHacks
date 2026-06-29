@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../config/defaults";
 import type { ScanReport } from "../scanner/types";
 import { buildSkillsIndex } from "./indexer";
-import { collectRepoEvidence, routeSkills, routeSkillsFromReport, scoreSkill } from "./router";
+import { collectRepoEvidence, passesEvidenceGates, routeSkills, routeSkillsFromReport, scoreSkill } from "./router";
 import type { SkillIndexEntry } from "./types";
 
 const tempRoots: string[] = [];
@@ -31,6 +31,39 @@ Full body for ${name}
 `,
     "utf8",
   );
+}
+
+function gatedSkills(): SkillIndexEntry[] {
+  return [
+    {
+      name: "testing-websocket-authentication-bypass",
+      description: "Websocket auth bypass testing",
+      tags: ["websocket", "auth", "api"],
+      path: "skills/external/websocket/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "detecting-credential-stuffing-on-login",
+      description: "Credential stuffing detection on login endpoints",
+      tags: ["credential-stuffing", "login", "auth"],
+      path: "skills/external/stuffing/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "abusing-saas-sso-token-replay",
+      description: "SaaS SSO OAuth token abuse",
+      tags: ["sso", "oauth", "saas"],
+      path: "skills/external/sso/SKILL.md",
+      sourceType: "external",
+    },
+    {
+      name: "testing-hardware-security-key-auth",
+      description: "Hardware security key and passkey auth review",
+      tags: ["webauthn", "passkey", "auth"],
+      path: "skills/external/webauthn/SKILL.md",
+      sourceType: "external",
+    },
+  ];
 }
 
 function tsCliReport(root: string): ScanReport {
@@ -143,6 +176,15 @@ describe("collectRepoEvidence", () => {
     expect(evidence.hasApiSurfaces).toBe(true);
     expect(evidence.hasAuthSurfaces).toBe(true);
   });
+
+  it("does not treat generic provider paths as SSO evidence", () => {
+    const report = tsCliReport("/tmp/project");
+    report.inventory.files.push({ path: "src/config/provider.ts", category: "typescript" });
+
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.hasSsoEvidence).toBe(false);
+  });
 });
 
 describe("routeSkills", () => {
@@ -239,6 +281,70 @@ describe("routeSkills", () => {
 
     expect(authSkill).toBeDefined();
     expect(authSkill?.reasons.some((reason) => reason.includes("/api/login"))).toBe(true);
+  });
+
+  it("excludes websocket skills without websocket evidence", () => {
+    const report = tsCliReport("/tmp/project");
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.hasWebsocketEvidence).toBe(false);
+    expect(passesEvidenceGates(gatedSkills()[0], evidence)).toBe(false);
+
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...gatedSkills()] });
+    expect(selected.map((skill) => skill.name)).not.toContain("testing-websocket-authentication-bypass");
+  });
+
+  it("excludes hardware key skills without webauthn or passkey evidence", () => {
+    const report = tsCliReport("/tmp/project");
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.hasWebauthnEvidence).toBe(false);
+    expect(passesEvidenceGates(gatedSkills()[3], evidence)).toBe(false);
+
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...gatedSkills()] });
+    expect(selected.map((skill) => skill.name)).not.toContain("testing-hardware-security-key-auth");
+  });
+
+  it("excludes SSO skills without oauth, saml, or sso evidence", () => {
+    const report = tsCliReport("/tmp/project");
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.hasSsoEvidence).toBe(false);
+    expect(passesEvidenceGates(gatedSkills()[2], evidence)).toBe(false);
+
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...gatedSkills()] });
+    expect(selected.map((skill) => skill.name)).not.toContain("abusing-saas-sso-token-replay");
+  });
+
+  it("excludes credential stuffing skills without login plus abuse signals", () => {
+    const report = tsCliReport("/tmp/project");
+    const evidence = collectRepoEvidence(report);
+
+    expect(evidence.hasCredentialStuffingEvidence).toBe(false);
+    expect(passesEvidenceGates(gatedSkills()[1], evidence)).toBe(false);
+
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...gatedSkills()] });
+    expect(selected.map((skill) => skill.name)).not.toContain("detecting-credential-stuffing-on-login");
+  });
+
+  it("still selects API and auth skills when matching surfaces exist", () => {
+    const report = tsCliReport("/tmp/project");
+    const selected = routeSkills(report, { skills: [...relevantSkills(), ...gatedSkills()] });
+    const names = selected.map((skill) => skill.name);
+
+    expect(names).toContain("testing-api-for-broken-object-level-authorization");
+    expect(names).toContain("reviewing-auth-middleware-coverage");
+  });
+
+  it("distributes scores instead of maxing every selected skill", () => {
+    const report = tsCliReport("/tmp/project");
+    const selected = routeSkills(report, { skills: relevantSkills() });
+
+    expect(selected.length).toBeGreaterThan(1);
+    const scores = selected.map((skill) => skill.score);
+    expect(new Set(scores).size).toBeGreaterThan(1);
+    expect(scores.every((score) => score === 1)).toBe(false);
+    expect(scores.every((score) => score <= 0.95)).toBe(true);
   });
 });
 

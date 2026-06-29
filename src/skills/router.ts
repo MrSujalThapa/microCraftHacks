@@ -82,15 +82,27 @@ const DOMAIN_SIGNALS: Record<string, string[]> = {
   malware: ["malware", "cryptomining", "ransomware"],
   forensics: ["forensics", "siem", "incident-response", "intrusion", "edr", "velociraptor", "crowdstrike"],
   compliance: ["nist", "rmf", "fedramp", "cis-benchmark"],
+  mobile: ["mobile", "android", "ios", "kotlin", "swift", "mobile-security"],
+  ai: ["garak", "llm-red-teaming", "llm", "langchain", "openai", "transformer"],
+  endpoint_security: ["defender", "osquery", "mde", "asr", "sentinelone", "windows-defender"],
 };
 
 const SURFACE_SKILL_HINTS: Record<string, string[]> = {
-  api: ["api", "rest", "endpoint", "owasp", "bola", "authorization", "schema", "graphql", "websocket"],
-  auth: ["auth", "authentication", "authorization", "access-control", "oauth", "jwt", "session", "login"],
-  secrets: ["secret", "credential", "env", "config", "token", "key"],
+  api: ["api", "rest", "endpoint", "owasp", "bola", "authorization", "schema", "graphql"],
+  auth: ["auth", "authentication", "authorization", "access-control", "jwt", "session", "login"],
+  secrets: ["secret", "credential", "env", "config"],
   dependency: ["dependency", "supply-chain", "package", "npm", "composer"],
-  validation: ["validation", "schema", "input", "sanitization"],
 };
+
+const WEBSOCKET_EVIDENCE = ["websocket", "socketio", "socket-io", "socket-io-client"];
+const SSO_EVIDENCE = ["oauth", "saml", "sso", "oidc", "openid"];
+const WEBAUTHN_EVIDENCE = ["webauthn", "fido", "u2f", "passkey", "security-key", "securitykey"];
+const CREDENTIAL_STUFFING_AUTH = ["login", "auth", "signin", "sign-in"];
+const CREDENTIAL_STUFFING_ABUSE = ["rate-limit", "ratelimit", "bruteforce", "brute-force", "session"];
+
+const SCORE_NORMALIZER = 22;
+const MIN_ROUTE_SCORE = 0.22;
+const DEFAULT_ROUTE_LIMIT = 10;
 
 const EXCLUDED_INVENTORY_PREFIXES = [
   "skills/external/",
@@ -162,6 +174,10 @@ export interface RepoEvidence {
   hasAuthSurfaces: boolean;
   hasSecretsSignals: boolean;
   hasDependencySignals: boolean;
+  hasWebsocketEvidence: boolean;
+  hasCredentialStuffingEvidence: boolean;
+  hasSsoEvidence: boolean;
+  hasWebauthnEvidence: boolean;
 }
 
 function normalizeToken(value: string): string {
@@ -195,6 +211,30 @@ function addEvidence(
       evidence.detectedDomains.add(domain);
     }
   }
+
+  updateEvidenceGates(evidence, normalized);
+}
+
+function hasKeyword(evidence: RepoEvidence, tokens: string[]): boolean {
+  return tokens.some((token) => evidence.keywords.has(normalizeToken(token)));
+}
+
+function updateEvidenceGates(evidence: RepoEvidence, normalized: string): void {
+  if (WEBSOCKET_EVIDENCE.includes(normalized) || normalized === "ws") {
+    evidence.hasWebsocketEvidence = true;
+  }
+  if (SSO_EVIDENCE.includes(normalized)) {
+    evidence.hasSsoEvidence = true;
+  }
+  if (WEBAUTHN_EVIDENCE.includes(normalized)) {
+    evidence.hasWebauthnEvidence = true;
+  }
+}
+
+function refreshCredentialStuffingGate(evidence: RepoEvidence): void {
+  const hasAuthEndpoint = evidence.hasAuthSurfaces && hasKeyword(evidence, CREDENTIAL_STUFFING_AUTH);
+  const hasAbuseSignal = hasKeyword(evidence, CREDENTIAL_STUFFING_ABUSE);
+  evidence.hasCredentialStuffingEvidence = hasAuthEndpoint && hasAbuseSignal;
 }
 
 function basenameWithoutExt(path: string): string {
@@ -220,6 +260,10 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
     hasAuthSurfaces: false,
     hasSecretsSignals: false,
     hasDependencySignals: false,
+    hasWebsocketEvidence: false,
+    hasCredentialStuffingEvidence: false,
+    hasSsoEvidence: false,
+    hasWebauthnEvidence: false,
   };
 
   for (const stack of report.stack ?? []) {
@@ -247,14 +291,28 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
       }
       for (const segment of route.path.split("/")) {
         if (segment && segment !== "api" && segment !== "v1") {
-          addEvidence(evidence, segment, `route segment: ${route.path}`, 4);
+          addEvidence(evidence, segment, `route: ${route.path}`, 4);
         }
+      }
+      const pathLower = route.path.toLowerCase();
+      if (pathLower.includes("websocket") || pathLower.includes("/ws") || pathLower.includes("socket")) {
+        addEvidence(evidence, "websocket", `route: ${route.path}`, 5);
+      }
+      if (pathLower.includes("/api")) {
+        addEvidence(evidence, "api", `route: ${route.path}`, 3);
+        addEvidence(evidence, "rest", `route handler: ${route.file}`, 2);
+      }
+      if (pathLower.includes("login") || pathLower.includes("auth")) {
+        addEvidence(evidence, "authorization", `route: ${route.path}`, 3);
+        addEvidence(evidence, "authentication", `route: ${route.path}`, 3);
       }
     }
 
     for (const auth of surfaces.auth) {
       evidence.hasAuthSurfaces = true;
       addEvidence(evidence, auth.file, `auth surface: ${auth.file}`, 5);
+      addEvidence(evidence, "authentication", `auth surface: ${auth.file}`, 3);
+      addEvidence(evidence, "authorization", `auth surface: ${auth.file}`, 3);
       if (auth.type) {
         addEvidence(evidence, auth.type, `auth type: ${auth.type}`, 4);
       }
@@ -270,16 +328,6 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
       addEvidence(evidence, model.file, `data model file: ${model.file}`, 4);
     }
 
-    if (evidence.hasApiSurfaces) {
-      for (const hint of SURFACE_SKILL_HINTS.api) {
-        addEvidence(evidence, hint, "inferred: API surfaces detected", 3);
-      }
-    }
-    if (evidence.hasAuthSurfaces) {
-      for (const hint of SURFACE_SKILL_HINTS.auth) {
-        addEvidence(evidence, hint, "inferred: auth surfaces detected", 3);
-      }
-    }
   }
 
   for (const file of report.inventory.files) {
@@ -319,13 +367,45 @@ export function collectRepoEvidence(report: ScanReport): RepoEvidence {
     }
   }
 
-  if (evidence.hasSecretsSignals) {
-    for (const hint of SURFACE_SKILL_HINTS.secrets) {
-      addEvidence(evidence, hint, "inferred: secrets/config signals", 3);
-    }
-  }
+  refreshCredentialStuffingGate(evidence);
 
   return evidence;
+}
+
+function skillCorpus(skill: SkillIndexEntry): string {
+  return [skill.name, skill.description, skill.domain ?? "", skill.subdomain ?? "", ...skill.tags]
+    .join(" ")
+    .toLowerCase();
+}
+
+function skillNameAndTags(skill: SkillIndexEntry): string {
+  return [skill.name, ...skill.tags].join(" ").toLowerCase();
+}
+
+function skillMatchesAny(skill: SkillIndexEntry, needles: string[]): boolean {
+  const corpus = skillCorpus(skill);
+  return needles.some((needle) => corpus.includes(needle));
+}
+
+function skillNamedOrTagged(skill: SkillIndexEntry, needles: string[]): boolean {
+  const corpus = skillNameAndTags(skill);
+  return needles.some((needle) => corpus.includes(needle));
+}
+
+export function passesEvidenceGates(skill: SkillIndexEntry, evidence: RepoEvidence): boolean {
+  if (skillMatchesAny(skill, ["websocket", "socket-io", "socketio"])) {
+    return evidence.hasWebsocketEvidence;
+  }
+  if (skillMatchesAny(skill, ["credential-stuffing", "credential stuffing"])) {
+    return evidence.hasCredentialStuffingEvidence;
+  }
+  if (skillNamedOrTagged(skill, ["sso", "saml", "oidc", "oauth", "oauth2"])) {
+    return evidence.hasSsoEvidence;
+  }
+  if (skillMatchesAny(skill, ["webauthn", "fido", "u2f", "passkey", "security-key", "hardware key"])) {
+    return evidence.hasWebauthnEvidence;
+  }
+  return true;
 }
 
 function skillDomainTokens(skill: SkillIndexEntry): Set<string> {
@@ -401,44 +481,51 @@ function inferAgentTypes(skill: SkillIndexEntry, matchedTokens: string[]): strin
   return [...agents].sort();
 }
 
-function surfaceBoost(skill: SkillIndexEntry, evidence: RepoEvidence): number {
-  let boost = 0;
-  const corpus = [
-    skill.name,
-    skill.description,
-    ...skill.tags,
-    skill.domain ?? "",
-    skill.subdomain ?? "",
-  ]
-    .join(" ")
-    .toLowerCase();
+function surfaceBoost(skill: SkillIndexEntry, evidence: RepoEvidence, concreteMatches: number): number {
+  if (concreteMatches === 0) {
+    return 0;
+  }
 
-  if (evidence.hasApiSurfaces) {
-    if (SURFACE_SKILL_HINTS.api.some((hint) => corpus.includes(hint))) {
-      boost += 3;
-    }
+  let boost = 0;
+  const corpus = skillCorpus(skill);
+
+  if (evidence.hasApiSurfaces && SURFACE_SKILL_HINTS.api.some((hint) => corpus.includes(hint))) {
+    boost += 1;
   }
-  if (evidence.hasAuthSurfaces) {
-    if (SURFACE_SKILL_HINTS.auth.some((hint) => corpus.includes(hint))) {
-      boost += 3;
-    }
+  if (evidence.hasAuthSurfaces && SURFACE_SKILL_HINTS.auth.some((hint) => corpus.includes(hint))) {
+    boost += 1;
   }
-  if (evidence.hasSecretsSignals) {
-    if (SURFACE_SKILL_HINTS.secrets.some((hint) => corpus.includes(hint))) {
-      boost += 3;
-    }
+  if (evidence.hasSecretsSignals && SURFACE_SKILL_HINTS.secrets.some((hint) => corpus.includes(hint))) {
+    boost += 1;
   }
-  if (evidence.hasDependencySignals) {
-    if (SURFACE_SKILL_HINTS.dependency.some((hint) => corpus.includes(hint))) {
-      boost += 2;
-    }
+  if (evidence.hasDependencySignals && SURFACE_SKILL_HINTS.dependency.some((hint) => corpus.includes(hint))) {
+    boost += 1;
   }
 
   return boost;
 }
 
 function reasonPriority(reason: string): number {
-  return reason.startsWith("inferred:") ? 1 : 0;
+  if (reason.startsWith("tag ")) {
+    return 2;
+  }
+  if (reason.startsWith("inferred:")) {
+    return 3;
+  }
+  return 0;
+}
+
+function isConcreteReason(reason: string): boolean {
+  return (
+    reason.startsWith("route:") ||
+    reason.startsWith("auth surface:") ||
+    reason.startsWith("auth type:") ||
+    reason.startsWith("stack:") ||
+    reason.startsWith("config:") ||
+    reason.startsWith("source file:") ||
+    reason.startsWith("route handler:") ||
+    reason.startsWith("data model")
+  );
 }
 
 function hasUnsupportedDomain(skill: SkillIndexEntry, evidence: RepoEvidence): boolean {
@@ -452,7 +539,7 @@ function hasUnsupportedDomain(skill: SkillIndexEntry, evidence: RepoEvidence): b
 }
 
 export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): RoutedSkillSelection | null {
-  if (hasUnsupportedDomain(skill, evidence)) {
+  if (hasUnsupportedDomain(skill, evidence) || !passesEvidenceGates(skill, evidence)) {
     return null;
   }
 
@@ -469,11 +556,10 @@ export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): Rout
 
     const isGeneric = GENERIC_TERMS.has(token);
     for (const match of matches) {
-      const weight = isGeneric ? Math.max(1, Math.floor(match.weight / 2)) : match.weight;
+      const weight = isGeneric ? Math.max(1, Math.floor(match.weight / 3)) : match.weight;
       score += weight;
-      reasons.push(match.reason);
-
-      if (!isGeneric && match.weight >= 2) {
+      if (isConcreteReason(match.reason)) {
+        reasons.push(match.reason);
         concreteMatches += 1;
       }
     }
@@ -487,7 +573,10 @@ export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): Rout
     }
     const isGeneric = GENERIC_TERMS.has(normalized);
     for (const match of matches) {
-      score += isGeneric ? 1 : 4;
+      if (!isConcreteReason(match.reason)) {
+        continue;
+      }
+      score += isGeneric ? 1 : 3;
       reasons.push(`tag ${tag} -> ${match.reason}`);
       if (!isGeneric) {
         concreteMatches += 1;
@@ -495,14 +584,14 @@ export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): Rout
     }
   }
 
-  score += surfaceBoost(skill, evidence);
+  score += surfaceBoost(skill, evidence, concreteMatches);
 
   if (concreteMatches === 0 || score === 0) {
     return null;
   }
 
-  const normalizedScore = Math.min(1, score / 12);
-  if (normalizedScore < 0.2) {
+  const normalizedScore = Math.min(0.95, score / SCORE_NORMALIZER);
+  if (normalizedScore < MIN_ROUTE_SCORE) {
     return null;
   }
 
@@ -523,7 +612,7 @@ export function scoreSkill(skill: SkillIndexEntry, evidence: RepoEvidence): Rout
 export function routeSkills(
   report: ScanReport,
   index: { skills: SkillIndexEntry[] },
-  limit = 15,
+  limit = DEFAULT_ROUTE_LIMIT,
 ): RoutedSkillSelection[] {
   const evidence = collectRepoEvidence(report);
 
