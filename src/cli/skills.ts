@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { loadConfig } from "../config/load";
 import { printCliError } from "./errors";
 import { buildSkillsIndex, printSkillsList, readSkillsIndex } from "../skills/indexer";
+import { printRouteSummary, routeSkillsFromReport } from "../skills/router";
 import { syncSkills } from "../skills/sync";
 
 export function runSkillsSyncCommand(options: { repo?: string; ref?: string } = {}): void {
@@ -48,6 +49,14 @@ export function runSkillsListCommand(): void {
 
   const index = readSkillsIndex(root, config);
   printSkillsList(index);
+}
+
+export function runSkillsRouteCommand(reportPath: string): void {
+  const root = resolve(process.cwd());
+  const config = loadConfig(root);
+
+  const result = routeSkillsFromReport(root, config, reportPath);
+  printRouteSummary(result.output, result.outputPath);
 }
 
 export function runSkillsCommand(action: () => void): void {

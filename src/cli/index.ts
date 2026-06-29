@@ -6,7 +6,7 @@ import { runDoctor } from "./doctor";
 import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
-import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsSyncCommand } from "./skills";
+import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
 const program = new Command();
@@ -67,6 +67,14 @@ skillsCommand
   .description("List indexed skills")
   .action(() => {
     runSkillsCommand(() => runSkillsListCommand());
+  });
+
+skillsCommand
+  .command("route")
+  .description("Route relevant skills from a scan report")
+  .requiredOption("--report <path>", "Path to scan report JSON")
+  .action((options: { report: string }) => {
+    runSkillsCommand(() => runSkillsRouteCommand(options.report));
   });
 
 program.parse(process.argv);
