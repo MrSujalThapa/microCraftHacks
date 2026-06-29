@@ -240,6 +240,111 @@ describe("runAgentRuntime", () => {
       }),
     ).toThrow(/Python runtime root not found/);
   });
+
+  it("from-cache fails fast when no cached run exists", () => {
+    const repoRoot = resolveRepoRoot();
+    const root = makeTempRoot();
+    const reportPath = join(root, "scan-test.json");
+    const routedSkillsPath = join(root, "routed-skills.json");
+
+    writeFileSync(
+      reportPath,
+      `${JSON.stringify(
+        {
+          version: "0.1.0",
+          scannedAt: "2026-06-29T12:00:00.000Z",
+          projectRoot: root,
+          inventory: { totalFiles: 0, byCategory: {}, files: [] },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    writeFileSync(
+      routedSkillsPath,
+      `${JSON.stringify(
+        {
+          reportPath,
+          routedAt: "2026-06-29T12:01:00.000Z",
+          selected: [],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    expect(() =>
+      runAgentRuntime({
+        root,
+        reportPath,
+        routedSkillsPath,
+        runtimeRoot: join(repoRoot, "agent_runtime"),
+        provider: "mock",
+        fromCache: true,
+      }),
+    ).toThrow(/No cached agent run for this scan hash/);
+  });
+
+  it("from-cache replays cached findings without model calls", () => {
+    const repoRoot = resolveRepoRoot();
+    const root = makeTempRoot();
+    const reportPath = join(root, "scan-test.json");
+    const routedSkillsPath = join(root, "routed-skills.json");
+
+    writeFileSync(
+      reportPath,
+      `${JSON.stringify(
+        {
+          version: "0.1.0",
+          scannedAt: "2026-06-29T12:00:00.000Z",
+          projectRoot: root,
+          inventory: { totalFiles: 0, byCategory: {}, files: [] },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    writeFileSync(
+      routedSkillsPath,
+      `${JSON.stringify(
+        {
+          reportPath,
+          routedAt: "2026-06-29T12:01:00.000Z",
+          selected: [],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const first = runAgentRuntime({
+      root,
+      reportPath,
+      routedSkillsPath,
+      runtimeRoot: join(repoRoot, "agent_runtime"),
+      provider: "mock",
+      mode: "full",
+    });
+    expect(first.runtimeMetrics?.cache?.hit).toBe(false);
+
+    const replay = runAgentRuntime({
+      root,
+      reportPath,
+      routedSkillsPath,
+      runtimeRoot: join(repoRoot, "agent_runtime"),
+      provider: "mock",
+      mode: "full",
+      fromCache: true,
+    });
+
+    expect(replay.runtimeMetrics?.cache?.hit).toBe(true);
+    expect(replay.runtimeMetrics?.providerCalls ?? []).toHaveLength(0);
+    expect(replay.runtimeMetrics?.elapsedMs ?? Number.MAX_SAFE_INTEGER).toBeLessThan(5000);
+  });
 });
 
 function resolveRepoRoot(): string {

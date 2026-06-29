@@ -175,6 +175,119 @@ describe("filterDemoFindings", () => {
   });
 });
 
+describe("wattif report shapes", () => {
+  function sparseHealthFinding(
+    id: string,
+    title: string,
+    overrides: Partial<VerifiedFinding> = {},
+  ): VerifiedFinding {
+    const base = sampleFindingsReport().verifiedFindings[0]!;
+    return {
+      ...base,
+      id,
+      title,
+      vulnerability_class: "broken-access-control",
+      claim: title,
+      affected_surfaces: [],
+      affected_files: ["backend/app/routes/health.py"],
+      evidence: [
+        {
+          type: "file",
+          explanation: title,
+          path: "backend/app/routes/health.py",
+          line_start: 12,
+          line_end: 18,
+          evidence_pack_id: `ep-${id}`,
+        },
+      ],
+      confidence: "high",
+      ranking_rationale: {
+        ...base.ranking_rationale,
+        total_score: 0.82,
+      },
+      demo_ready: true,
+      ...overrides,
+    };
+  }
+
+  function wattifSecretFinding(): VerifiedFinding {
+    const base = sampleFindingsReport().verifiedFindings[0]!;
+    return {
+      ...base,
+      id: "verified-draft-h1",
+      title: "Hardcoded SUPABASE_SERVICE_ROLE_KEY in backend/.env",
+      vulnerability_class: "secret-exposure",
+      claim:
+        "SUPABASE_SERVICE_ROLE_KEY in backend/.env:4 is assigned in tracked configuration without using a secret manager.",
+      affected_surfaces: [],
+      affected_files: ["backend/.env"],
+      evidence: [
+        {
+          type: "file",
+          explanation:
+            "SUPABASE_SERVICE_ROLE_KEY appears in backend/.env:4 with a credential-like assignment.",
+          path: "backend/.env",
+          line_start: 4,
+          line_end: 4,
+          snippet: "SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>",
+          evidence_pack_id: "ep-secret-h1",
+          symbol: "SUPABASE_SERVICE_ROLE_KEY",
+        },
+      ],
+      confidence: "high",
+      severity: "critical",
+      demo_ready: true,
+    };
+  }
+
+  it("hides sparse /api/health auth finding with exact wattif title", () => {
+    const finding = sparseHealthFinding(
+      "verified-draft-auth-health",
+      "/api/health handler lacks visible auth dependency",
+    );
+    expect(isDemoReady(finding)).toBe(false);
+  });
+
+  it("hides sparse /api/health validation finding with exact wattif title", () => {
+    const finding = sparseHealthFinding(
+      "verified-draft-validation-health",
+      "/api/health handler lacks visible validation in backend/app/routes/health.py",
+    );
+    expect(isDemoReady(finding)).toBe(false);
+  });
+
+  it("findings --demo keeps only verified-draft-h1 for wattif report shape", () => {
+    const report = {
+      ...sampleFindingsReport(),
+      verifiedFindings: [
+        sparseHealthFinding(
+          "verified-draft-auth-health",
+          "/api/health handler lacks visible auth dependency",
+        ),
+        sparseHealthFinding(
+          "verified-draft-validation-health",
+          "/api/health handler lacks visible validation in backend/app/routes/health.py",
+        ),
+        wattifSecretFinding(),
+      ],
+      metrics: {
+        summary: {
+          verifiedCount: 3,
+          rejectedCount: 0,
+          demoReadyCount: 3,
+        },
+      },
+    };
+
+    const output = formatFindingsTable(report, "wattif-findings.json", { demoOnly: true });
+    expect(output).toContain("verified-draft-h1");
+    expect(output).not.toContain("verified-draft-auth-health");
+    expect(output).not.toContain("verified-draft-validation-health");
+    expect(output).not.toContain("lacks visible auth");
+    expect(output).not.toContain("lacks visible validation");
+  });
+});
+
 describe("formatFindingsTable demoOnly", () => {
   it("shows only demo-ready findings and hides /api/health noise", () => {
     const report = {

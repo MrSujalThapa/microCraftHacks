@@ -8,6 +8,7 @@ from pathlib import Path
 
 from cyber_swarm.bridge import run_bridge
 from cyber_swarm.models.runtime_config import RuntimeConfig
+from cyber_swarm.schemas.cache import CacheReplayError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -103,6 +104,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         run_bridge(args.scan_report, args.routed_skills, args.output, runtime_config=runtime_config)
+    except CacheReplayError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     except Exception:
         import traceback
 

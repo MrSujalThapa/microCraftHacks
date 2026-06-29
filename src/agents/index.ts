@@ -64,7 +64,9 @@ export function runAgentsCommand(options: {
     console.log(`Cache: ${cache.hit ? "hit" : "miss"}  scanHash=${cache.scanHash}`);
   }
   const calls = result.runtimeMetrics?.providerCalls ?? [];
-  if (calls.length > 0) {
+  if (cache?.hit) {
+    console.log("Model calls: 0");
+  } else if (calls.length > 0) {
     const totalTokens = calls.reduce((sum, call) => {
       const tokens = call.totalTokens;
       return sum + (typeof tokens === "number" ? tokens : 0);

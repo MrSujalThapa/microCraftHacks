@@ -29,10 +29,7 @@ export function formatFindingsTable(
   const summary = report.metrics.summary;
   const verifiedCount = summary?.verifiedCount ?? report.verifiedFindings.length;
   const rejectedCount = summary?.rejectedCount ?? report.rejectedFindings.length;
-  const demoReadyCount =
-    typeof summary?.demoReadyCount === "number"
-      ? summary.demoReadyCount
-      : report.verifiedFindings.filter(isDemoReady).length;
+  const demoReadyCount = report.verifiedFindings.filter(isDemoReady).length;
 
   lines.push(`Findings report: ${reportPath}`);
   lines.push(

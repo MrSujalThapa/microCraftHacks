@@ -185,8 +185,11 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
   const exitCode = result.status ?? 1;
 
   if (exitCode !== 0) {
+    const detail = stderr.trim() || stdout.trim();
     throw new AgentRuntimeError(
-      `Python agent runtime failed with exit code ${exitCode}`,
+      detail
+        ? `Python agent runtime failed with exit code ${exitCode}: ${detail}`
+        : `Python agent runtime failed with exit code ${exitCode}`,
       exitCode,
       stdout,
       stderr,

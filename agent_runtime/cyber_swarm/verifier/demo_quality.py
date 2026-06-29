@@ -15,7 +15,8 @@ _GENERIC_AUTH_GAP = re.compile(
     r"(?:auth(?:entication|orization)?|validation|credentials?|guard|middleware)|"
     r"unauthenticated|not enforced|not validated|"
     r"visible auth|visible validation|visible authorization|"
-    r"auth dependency|schema validation|"
+    r"missing visible auth|missing visible validation|"
+    r"lacks auth dependency|lacks schema validation|"
     r"public health|health endpoint|health check|health route|"
     r"/health|/api/health|/ping|/status"
     r")"
@@ -47,6 +48,19 @@ def is_public_route(route: str) -> bool:
     return normalize_route(route) in PUBLIC_ROUTE_PATHS
 
 
+_ROUTE_IN_TEXT = re.compile(r"(?i)(/api/health|/health\b|/status\b|/ping\b)")
+
+
+def _routes_from_text(finding: VerifiedFinding | AgentFindingDraft) -> set[str]:
+    routes: set[str] = set()
+    text = _finding_text(finding)
+    for match in _ROUTE_IN_TEXT.finditer(text):
+        routes.add(normalize_route(match.group(1)))
+    if re.search(r"(?i)\bhealth endpoint\b|\bhealth check\b|\bpublic health\b", text):
+        routes.add("/health")
+    return routes
+
+
 def _collect_routes(finding: VerifiedFinding | AgentFindingDraft) -> set[str]:
     routes: set[str] = set()
     for surface in finding.affected_surfaces:
@@ -55,6 +69,7 @@ def _collect_routes(finding: VerifiedFinding | AgentFindingDraft) -> set[str]:
     for item in finding.evidence:
         if item.route:
             routes.add(normalize_route(item.route))
+    routes.update(_routes_from_text(finding))
     return routes
 
 
@@ -107,6 +122,13 @@ def assess_demo_quality(finding: VerifiedFinding) -> tuple[bool, str]:
 
     if finding.vulnerability_class == "secret-exposure":
         return True, "Verified secret exposure with redacted evidence"
+
+    routes = _collect_routes(finding)
+    if routes and routes.issubset(PUBLIC_ROUTE_PATHS) and _GENERIC_AUTH_GAP.search(_finding_text(finding)):
+        return (
+            False,
+            "Public health/root route finding without sensitive exposure or side effects",
+        )
 
     if finding.confidence == "high" and finding.ranking_rationale.total_score >= 0.5:
         return True, "High-confidence verified finding with strong ranking score"

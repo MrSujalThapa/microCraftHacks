@@ -3,7 +3,7 @@ import type { VerifiedFinding } from "./types";
 const PUBLIC_ROUTE_PATHS = new Set(["/", "/health", "/api/health", "/status", "/ping"]);
 
 const GENERIC_AUTH_GAP =
-  /(?:missing|lacks|without|no|not)\s+(?:[\w-]+\s+){0,4}(?:auth(?:entication|orization)?|validation|credentials?|guard|middleware)|unauthenticated|not enforced|not validated|visible auth|visible validation|visible authorization|auth dependency|schema validation|public health|health endpoint|health check|health route|\/health|\/api\/health|\/ping|\/status/i;
+  /(?:missing|lacks|without|no|not)\s+(?:[\w-]+\s+){0,4}(?:auth(?:entication|orization)?|validation|credentials?|guard|middleware)|unauthenticated|not enforced|not validated|visible auth|visible validation|visible authorization|missing visible auth|missing visible validation|lacks auth dependency|lacks schema validation|auth dependency|schema validation|public health|health endpoint|health check|health route|\/health|\/api\/health|\/ping|\/status/i;
 
 const SENSITIVE_INDICATORS =
   /credential|secret|password|token|api[_-]?key|private[_-]?key|pii|ssn|credit.?card|user.?data|email.?address|database.?url|connection.?string|internal.?infra|stack.?trace|debug.?info|env.?var|service.?role|admin.?key|side.?effect|tool.?call|llm|openai|anthropic|embedding|prompt.?injection|supabase|postgres|redis|aws|stripe/i;
@@ -12,6 +12,8 @@ const STATE_CHANGING = /\b(post|put|patch|delete|mutate|write|execute|invoke)\b/
 
 const NEGATIVE_AUTH_CONTEXT =
   /\b(without|missing|lacks|no)\s+(auth(?:entication)?|credentials?|validation)\b/gi;
+
+const ROUTES_IN_TEXT = /(?:^|\s|['"`(])(\/api\/health|\/health|\/status|\/ping)\b/gi;
 
 export interface DemoQualityAssessment {
   demoReady: boolean;
@@ -27,6 +29,18 @@ function normalizeRoute(route: string): string {
   return trimmed || "/";
 }
 
+function routesFromText(finding: VerifiedFinding): Set<string> {
+  const routes = new Set<string>();
+  const text = findingText(finding);
+  for (const match of text.matchAll(ROUTES_IN_TEXT)) {
+    routes.add(normalizeRoute(match[1]!));
+  }
+  if (/\bhealth endpoint\b|\bhealth check\b|\bpublic health\b/i.test(text)) {
+    routes.add("/health");
+  }
+  return routes;
+}
+
 function collectRoutes(finding: VerifiedFinding): Set<string> {
   const routes = new Set<string>();
   for (const surface of finding.affected_surfaces) {
@@ -39,11 +53,14 @@ function collectRoutes(finding: VerifiedFinding): Set<string> {
       routes.add(normalizeRoute(item.route));
     }
   }
+  for (const route of routesFromText(finding)) {
+    routes.add(route);
+  }
   return routes;
 }
 
 function findingText(finding: VerifiedFinding): string {
-  const parts = [finding.title, finding.claim, finding.impact_hypothesis];
+  const parts = [finding.title, finding.claim, finding.impact_hypothesis, finding.attack_path];
   for (const item of finding.evidence) {
     parts.push(item.explanation);
     if (item.snippet) {
@@ -54,7 +71,7 @@ function findingText(finding: VerifiedFinding): string {
 }
 
 function exposureText(finding: VerifiedFinding): string {
-  const blob = [findingText(finding), finding.attack_path].filter(Boolean).join(" ");
+  const blob = findingText(finding);
   return blob.replace(NEGATIVE_AUTH_CONTEXT, "");
 }
 
@@ -94,6 +111,17 @@ export function assessDemoQuality(finding: VerifiedFinding): DemoQualityAssessme
     return {
       demoReady: true,
       demoReason: "Verified secret exposure with redacted evidence",
+    };
+  }
+
+  const routes = collectRoutes(finding);
+  const onPublicRouteOnly =
+    routes.size > 0 && [...routes].every((route) => PUBLIC_ROUTE_PATHS.has(route));
+  if (onPublicRouteOnly && GENERIC_AUTH_GAP.test(findingText(finding))) {
+    return {
+      demoReady: false,
+      demoReason:
+        "Public health/root route finding without sensitive exposure or side effects",
     };
   }
 
