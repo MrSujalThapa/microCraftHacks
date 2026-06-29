@@ -39,12 +39,33 @@ describe("runAgentRuntime", () => {
 
     writeFileSync(
       reportPath,
-      `${JSON.stringify({ scannedAt: "2026-06-29T12:00:00.000Z", projectRoot: root }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          version: "0.1.0",
+          scannedAt: "2026-06-29T12:00:00.000Z",
+          projectRoot: root,
+          inventory: {
+            totalFiles: 0,
+            byCategory: {},
+            files: [],
+          },
+        },
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
     writeFileSync(
       routedSkillsPath,
-      `${JSON.stringify({ selected: [] }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          reportPath,
+          routedAt: "2026-06-29T12:01:00.000Z",
+          selected: [],
+        },
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
 

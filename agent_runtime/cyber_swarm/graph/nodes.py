@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from cyber_swarm.schemas.io import load_json, write_json
+from cyber_swarm.schemas.io import write_json
 from cyber_swarm.schemas.output import build_empty_output
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.rag.normalize import normalize_runtime_input
 
 
 def _merge_metrics(state: GraphState, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -20,14 +21,78 @@ def load_input(state: GraphState) -> GraphState:
     scan_report_path = Path(state["scan_report_path"])
     routed_skills_path = Path(state["routed_skills_path"])
 
-    scan_report = load_json(scan_report_path)
-    routed_skills = load_json(routed_skills_path)
-    selected = routed_skills.get("selected", [])
+    runtime_input = normalize_runtime_input(scan_report_path, routed_skills_path)
 
     return {
         **state,
-        "scan_report": scan_report,
-        "routed_skills": routed_skills,
+        "runtime_input": runtime_input,
+        "scan_report": {
+            "version": runtime_input.repo.version,
+            "scannedAt": runtime_input.repo.scanned_at,
+            "projectRoot": runtime_input.repo.project_root,
+            "inventory": {
+                "totalFiles": runtime_input.repo.inventory.total_files,
+                "byCategory": runtime_input.repo.inventory.by_category,
+                "files": [
+                    {"path": item.path, "category": item.category}
+                    for item in runtime_input.repo.inventory.files
+                ],
+            },
+            "stack": [
+                {
+                    "name": item.name,
+                    "confidence": item.confidence,
+                    "evidence": item.evidence,
+                }
+                for item in runtime_input.repo.stack
+            ],
+            "surfaces": {
+                "routes": [
+                    {
+                        "path": route.path,
+                        "file": route.file,
+                        **({"framework": route.framework} if route.framework else {}),
+                    }
+                    for route in runtime_input.repo.surfaces.routes
+                ],
+                "api": [
+                    {
+                        "path": route.path,
+                        "file": route.file,
+                        **({"framework": route.framework} if route.framework else {}),
+                    }
+                    for route in runtime_input.repo.surfaces.api
+                ],
+                "auth": [
+                    {
+                        "file": auth.file,
+                        **({"type": auth.type} if auth.type else {}),
+                    }
+                    for auth in runtime_input.repo.surfaces.auth
+                ],
+                "dataModels": [
+                    {
+                        "file": model.file,
+                        **({"name": model.name} if model.name else {}),
+                    }
+                    for model in runtime_input.repo.surfaces.data_models
+                ],
+            },
+        },
+        "routed_skills": {
+            "reportPath": runtime_input.routed_skills.report_path,
+            "routedAt": runtime_input.routed_skills.routed_at,
+            "selected": [
+                {
+                    "name": skill.name,
+                    "path": skill.path,
+                    "score": skill.score,
+                    "reasons": skill.reasons,
+                    "agentTypes": skill.agent_types,
+                }
+                for skill in runtime_input.routed_skills.selected
+            ],
+        },
         "draft_findings": [],
         "verified_findings": [],
         "rejected_findings": [],
@@ -36,7 +101,8 @@ def load_input(state: GraphState) -> GraphState:
             "load_input",
             {
                 "status": "completed",
-                "routedSkillCount": len(selected) if isinstance(selected, list) else 0,
+                "routedSkillCount": len(runtime_input.routed_skills.selected),
+                "normalized": True,
             },
         ),
     }
