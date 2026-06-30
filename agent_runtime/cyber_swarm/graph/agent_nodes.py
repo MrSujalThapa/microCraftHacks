@@ -19,8 +19,12 @@ from cyber_swarm.models.runtime_config import RuntimeConfig
 
 _DEMO_SPECIALIST_PRIORITY = {
     "secrets-config": 0,
-    "auth-breaker": 1,
-    "api-abuse": 2,
+    "object-ownership": 1,
+    "auth-boundary": 2,
+    "auth-breaker": 2,
+    "storage-access": 3,
+    "ai-action-boundary": 4,
+    "api-abuse": 5,
 }
 
 
@@ -228,6 +232,8 @@ def specialist_agents_node(state: GraphState) -> GraphState:
         hypotheses,
         selected_context,
         evidence_packs,
+        state.get("attack_graph"),
+        demo=runtime_config.is_demo,
     )
     drafts = _merge_secret_drafts(deterministic_secrets, drafts)
     drafts = _prioritize_drafts_for_demo(drafts, runtime_config)

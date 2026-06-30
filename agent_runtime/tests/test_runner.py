@@ -229,6 +229,7 @@ def test_run_workflow_executes_all_stages(tmp_path: Path):
         "rewrite_query",
         "finalize_context",
         "build_evidence_packs",
+        "build_attack_graph",
         "recon_agent",
         "attack_planner",
         "specialist_agents",

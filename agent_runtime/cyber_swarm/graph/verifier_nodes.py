@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from dataclasses import replace
+
 from cyber_swarm.agents.model_stages import run_verifier_review_with_provider
 from cyber_swarm.graph.state import GraphState
 from cyber_swarm.models.agents import AgentFindingDraft, RejectedFindingDraft
 from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.verifier.dedup import dedupe_verified_findings
 from cyber_swarm.verifier.demo_quality import annotate_demo_quality
+from cyber_swarm.verifier.qa_comparison import build_qa_comparison
 from cyber_swarm.verifier.ranking import rank_verified_findings, severity_counts, _SEVERITY_ORDER
 from cyber_swarm.verifier.verify import verify_drafts
 
@@ -96,6 +99,7 @@ def verifier_node(state: GraphState) -> GraphState:
         scan_report,
         context_paths=context_paths,
         evidence_packs=state.get("evidence_packs", []),
+        attack_graph=state.get("attack_graph"),
     )
 
     agent_rejected = [
@@ -164,6 +168,9 @@ def rank_node(state: GraphState) -> GraphState:
     ]
     ranked = rank_verified_findings(verified)
     annotated = [annotate_demo_quality(item) for item in ranked]
+    annotated = [
+        replace(item, qa_comparison=build_qa_comparison(item)) for item in annotated
+    ]
     runtime_config = state.get("runtime_config")
     if isinstance(runtime_config, RuntimeConfig) and runtime_config.is_demo:
         annotated = _cap_demo_ready_findings(annotated, max_demo=2)

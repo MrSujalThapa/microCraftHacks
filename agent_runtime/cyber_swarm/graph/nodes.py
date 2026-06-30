@@ -246,6 +246,7 @@ def report_stub(state: GraphState) -> GraphState:
                 "rewrite_query",
                 "finalize_context",
                 "build_evidence_packs",
+                "build_attack_graph",
                 "recon_agent",
                 "attack_planner",
                 "specialist_agents",
@@ -296,6 +297,12 @@ def report_stub(state: GraphState) -> GraphState:
     output["evidencePacks"] = [
         pack.to_dict() if isinstance(pack, EvidencePack) else pack for pack in evidence_packs
     ]
+
+    attack_graph = state.get("attack_graph")
+    if attack_graph is not None:
+        from cyber_swarm.graph.attack_graph_nodes import attack_graph_to_dict
+
+        output["attackGraph"] = attack_graph_to_dict(attack_graph)
 
     output = redact_output_payload(output)
     write_json(output_path, output)

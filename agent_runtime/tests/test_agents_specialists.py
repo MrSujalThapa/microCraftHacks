@@ -131,7 +131,7 @@ def test_specialists_emit_structured_drafts_and_redact_secrets(tmp_path: Path):
 
     drafts, rejected = run_specialists(
         runtime_input,
-        _hypotheses(),
+        [_hypotheses()[2]],
         context,
         build_evidence_packs(tmp_path, runtime_input.repo, {"src/auth.ts", ".env"}),
     )

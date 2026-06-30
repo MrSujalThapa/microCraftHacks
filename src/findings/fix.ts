@@ -28,6 +28,30 @@ const FIX_TEMPLATES: Record<string, FixTemplate> = {
       "Keep .env.example with placeholder values only.",
     ],
   },
+  bola: {
+    summary: "Enforce object ownership checks before data access using the authenticated user's identity.",
+    changes: [],
+    validation: [
+      "Create resource as user A; request with user B's token and a different owner_id; expect 403.",
+      "Assert queries filter by owner_id or tenant_id from the auth context, not from request params alone.",
+    ],
+  },
+  "privilege-escalation": {
+    summary: "Replace service-role/admin clients in request handlers with user-scoped clients protected by RLS.",
+    changes: [],
+    validation: [
+      "Confirm route handlers use anon/user-scoped Supabase clients only.",
+      "Integration test with anon key must not access other tenants' rows.",
+    ],
+  },
+  "ai-action-abuse": {
+    summary: "Gate AI/tool actions behind approval, role checks, or tenant boundaries before execution.",
+    changes: [],
+    validation: [
+      "Call action endpoint without approval flag; assert tool/LLM is not invoked.",
+      "Verify non-admin users cannot trigger side-effecting tool calls.",
+    ],
+  },
 };
 
 export function formatFixRefusal(findingId: string, reasons: string[]): string {
@@ -97,6 +121,13 @@ export function formatFixPlan(
   lines.push("Concrete fix locations");
   for (const location of collectFixLocations(finding)) {
     lines.push(`  - ${location}`);
+  }
+  if (finding.graph_path?.missing_guard) {
+    lines.push("");
+    lines.push("Graph remediation");
+    lines.push(`  Trust boundary: ${finding.graph_path.trust_boundary_crossed}`);
+    lines.push(`  Add guard: ${finding.graph_path.missing_guard}`);
+    lines.push(`  Path: ${finding.graph_path.path_description}`);
   }
   lines.push("");
   lines.push("Recommended changes");

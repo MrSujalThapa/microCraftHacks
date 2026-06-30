@@ -152,6 +152,17 @@ def _format_verified_finding(
         "",
     ]
 
+    graph_path = finding.get("graph_path")
+    if isinstance(graph_path, dict):
+        lines.extend(["**Graph path**", ""])
+        if graph_path.get("path_description"):
+            lines.append(redact_secrets(str(graph_path["path_description"])))
+        if graph_path.get("trust_boundary_crossed"):
+            lines.append(f"- Trust boundary: `{graph_path['trust_boundary_crossed']}`")
+        if graph_path.get("missing_guard"):
+            lines.append(f"- Missing guard: `{graph_path['missing_guard']}`")
+        lines.append("")
+
     surfaces = finding.get("affected_surfaces", [])
     if isinstance(surfaces, list) and surfaces:
         lines.extend(["**Affected surfaces**", ""])
@@ -184,6 +195,21 @@ def _format_verified_finding(
     lines.extend(["**Concrete fix plan**", ""])
     lines.extend(_format_fix_plan(finding))
     lines.append("")
+
+    qa = finding.get("qa_comparison")
+    if isinstance(qa, dict):
+        lines.extend(["**Why QA tests may miss this**", ""])
+        if qa.get("why_qa_may_miss"):
+            lines.append(redact_secrets(str(qa["why_qa_may_miss"])))
+        lines.append("")
+        lines.extend(["**Why code review may miss this**", ""])
+        if qa.get("why_review_may_miss"):
+            lines.append(redact_secrets(str(qa["why_review_may_miss"])))
+        lines.append("")
+        lines.extend(["**Suggested regression test**", ""])
+        if qa.get("suggested_regression_test"):
+            lines.append(redact_secrets(str(qa["suggested_regression_test"])))
+        lines.append("")
 
     rationale = finding.get("ranking_rationale", {})
     if isinstance(rationale, dict):

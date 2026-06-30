@@ -113,6 +113,18 @@ export function formatFindingExplanation(
   lines.push("");
   lines.push("Attack path");
   lines.push(redactSecrets(finding.attack_path));
+  if (finding.graph_path) {
+    lines.push("");
+    lines.push("Graph path");
+    lines.push(`  ${finding.graph_path.path_description}`);
+    lines.push(`  Trust boundary: ${finding.graph_path.trust_boundary_crossed}`);
+    if (finding.graph_path.attacker_controlled_input) {
+      lines.push(`  Attacker input: ${finding.graph_path.attacker_controlled_input}`);
+    }
+    if (finding.graph_path.missing_guard) {
+      lines.push(`  Missing guard: ${finding.graph_path.missing_guard}`);
+    }
+  }
   lines.push("");
   lines.push("Affected surfaces");
   for (const surface of finding.affected_surfaces) {
@@ -153,6 +165,18 @@ export function formatFindingExplanation(
   lines.push("Contributors");
   lines.push(`  Specialists: ${finding.contributing_specialists.join(", ") || "—"}`);
   lines.push(`  Playbooks: ${finding.selected_skills.join(", ") || "—"}`);
+
+  if (finding.qa_comparison) {
+    lines.push("");
+    lines.push("Why QA tests may miss this");
+    lines.push(`  ${finding.qa_comparison.why_qa_may_miss}`);
+    lines.push("");
+    lines.push("Why generic code review may miss this");
+    lines.push(`  ${finding.qa_comparison.why_review_may_miss}`);
+    lines.push("");
+    lines.push("Suggested regression/security test");
+    lines.push(`  ${finding.qa_comparison.suggested_regression_test}`);
+  }
 
   return lines.join("\n");
 }

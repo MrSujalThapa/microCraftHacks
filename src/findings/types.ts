@@ -1,6 +1,47 @@
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 export type Confidence = "high" | "medium" | "low";
 
+export interface GraphPathRef {
+  source_node_id: string;
+  sink_node_id: string;
+  trust_boundary_crossed: string;
+  attacker_controlled_input?: string;
+  missing_guard?: string;
+  edge_ids: string[];
+  path_description: string;
+}
+
+export interface QaComparison {
+  why_qa_may_miss: string;
+  why_review_may_miss: string;
+  suggested_regression_test: string;
+}
+
+export interface AttackGraphNode {
+  id: string;
+  node_type: string;
+  label: string;
+  path?: string;
+  line_start?: number;
+  line_end?: number;
+  route?: string;
+  symbol?: string;
+  evidence_pack_id?: string;
+}
+
+export interface AttackGraphEdge {
+  id: string;
+  source_id: string;
+  target_id: string;
+  edge_type: string;
+  label: string;
+}
+
+export interface AttackGraph {
+  nodes: AttackGraphNode[];
+  edges: AttackGraphEdge[];
+}
+
 export interface EvidenceRef {
   type: string;
   explanation: string;
@@ -64,6 +105,8 @@ export interface VerifiedFinding {
   source_draft_ids: string[];
   demo_ready?: boolean;
   demo_reason?: string;
+  graph_path?: GraphPathRef;
+  qa_comparison?: QaComparison;
 }
 
 export interface RejectedFinding {
@@ -98,4 +141,5 @@ export interface FindingsReport {
   needsMoreEvidenceFindings?: unknown[];
   capabilityDrafts?: unknown[];
   errors?: unknown[];
+  attackGraph?: AttackGraph;
 }

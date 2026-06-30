@@ -8,6 +8,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from cyber_swarm.graph.attack_graph_nodes import build_attack_graph_node
 from cyber_swarm.graph.evidence_nodes import build_evidence_packs_node
 from cyber_swarm.graph.agent_nodes import (
     attack_planner_node,
@@ -43,6 +44,7 @@ def build_workflow():
     graph.add_node("rewrite_query", rewrite_query_node)
     graph.add_node("finalize_context", finalize_context_node)
     graph.add_node("build_evidence_packs", build_evidence_packs_node)
+    graph.add_node("build_attack_graph", build_attack_graph_node)
     graph.add_node("recon_agent", recon_agent_node)
     graph.add_node("attack_planner", attack_planner_node)
     graph.add_node("specialist_agents", specialist_agents_node)
@@ -65,7 +67,8 @@ def build_workflow():
     )
     graph.add_edge("rewrite_query", "retrieve_context")
     graph.add_edge("finalize_context", "build_evidence_packs")
-    graph.add_edge("build_evidence_packs", "recon_agent")
+    graph.add_edge("build_evidence_packs", "build_attack_graph")
+    graph.add_edge("build_attack_graph", "recon_agent")
     graph.add_edge("recon_agent", "attack_planner")
     graph.add_edge("attack_planner", "specialist_agents")
     graph.add_edge("specialist_agents", "verifier")
