@@ -133,7 +133,8 @@ describe("formatFixPlan", () => {
     expect(output).toContain("runtime environment");
     expect(output).toContain("SUPABASE_SERVICE_ROLE_KEY");
     expect(output).not.toMatch(/^Patch backend\/\.env/m);
-    expect(output).not.toContain("Patch backend/.env:1");
+    expect(output).not.toMatch(/Rotate the exposed REDACTED_SECRET/i);
+    expect(output).not.toMatch(/Rotate REDACTED_SECRET/i);
   });
 
   it("uses access-control validation for broken-access-control class", () => {

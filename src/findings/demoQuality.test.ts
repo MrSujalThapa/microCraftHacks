@@ -5,6 +5,7 @@ import { sampleFindingsReport } from "./fixtures";
 import {
   assessDemoQuality,
   filterDemoFindings,
+  findBestDemoFinding,
   isDemoReady,
   isGenericDemoNoiseFinding,
   isGenericPublicRouteFinding,
@@ -347,6 +348,25 @@ describe("wattif report shapes", () => {
     expect(output).not.toContain("lacks visible auth");
     expect(output).not.toContain("verified-zones-validation");
     expect(output).not.toContain("/api/zones");
+  });
+});
+
+describe("findBestDemoFinding", () => {
+  it("prefers secret exposure findings", () => {
+    const base = sampleFindingsReport().verifiedFindings[0]!;
+    const secret = {
+      ...base,
+      id: "verified-secret",
+      vulnerability_class: "secret-exposure",
+      demo_ready: true,
+    };
+    const noise = {
+      ...base,
+      id: "verified-noise",
+      title: "/api/health handler lacks visible auth dependency",
+      demo_ready: false,
+    };
+    expect(findBestDemoFinding([noise, secret])?.id).toBe("verified-secret");
   });
 });
 

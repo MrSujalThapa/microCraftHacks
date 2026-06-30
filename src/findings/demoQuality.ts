@@ -230,3 +230,8 @@ export function filterDemoFindings(findings: VerifiedFinding[]): VerifiedFinding
   }
   return demoReady.slice(0, 2);
 }
+
+export function findBestDemoFinding(findings: VerifiedFinding[]): VerifiedFinding | null {
+  const demo = filterDemoFindings(findings);
+  return demo[0] ?? null;
+}

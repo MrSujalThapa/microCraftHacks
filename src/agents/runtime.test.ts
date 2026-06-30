@@ -90,7 +90,7 @@ describe("runAgentRuntime", () => {
     expect(existsSync(markdownPath)).toBe(true);
     const markdown = readFileSync(markdownPath, "utf8");
     expect(markdown).toContain("# Cyber Swarm Findings Report");
-    expect(markdown).toContain("## Summary");
+    expect(markdown).toContain("## Executive summary");
   });
 
   it("invokes Python runtime in demo mode", () => {

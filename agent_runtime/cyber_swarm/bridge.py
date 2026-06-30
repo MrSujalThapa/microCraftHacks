@@ -31,14 +31,14 @@ def _print_summary(output: dict) -> None:
 
     print("Cyber Swarm findings summary")
     if activation:
-        print("  Activation (skills are supplemental, not the execution plan):")
-        print(f"    skillsRouted: {activation.get('skillsRouted', 0)}")
-        print(f"    agentsPlanned: {activation.get('agentsPlanned', 0)}")
-        print(f"    agentsRun: {activation.get('agentsRun', 0)}")
+        print("  Activation (playbooks supplement routing, not execution plan):")
+        print(f"    playbooksRouted: {activation.get('skillsRouted', 0)}")
+        print(f"    specialistsPlanned: {activation.get('agentsPlanned', 0)}")
+        print(f"    specialistsRun: {activation.get('agentsRun', 0)}")
         agent_types = activation.get("agentTypes", [])
         if isinstance(agent_types, list):
             print(
-                f"    agentTypes: {', '.join(agent_types) if agent_types else 'none'}"
+                f"    specialistTypes: {', '.join(agent_types) if agent_types else 'none'}"
             )
         print(f"    findingsVerified: {activation.get('findingsVerified', len(verified))}")
         print(f"    findingsRejected: {activation.get('findingsRejected', len(rejected))}")

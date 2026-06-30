@@ -55,19 +55,21 @@ export function formatFindingsTable(
     severity: finding.severity,
     confidence: finding.confidence,
     demo: isDemoReady(finding) ? "yes" : "no",
-    title: truncate(finding.title, 32),
-    target: truncate(formatAffectedTarget(finding), 28),
+    class: truncate(finding.vulnerability_class, 20),
+    title: truncate(finding.title, 52),
+    target: truncate(formatAffectedTarget(finding), 32),
     id: finding.id,
   }));
 
-  const headers = ["SEVERITY", "CONF", "DEMO", "TITLE", "ROUTE/FILE", "ID"];
+  const headers = ["SEVERITY", "CONF", "DEMO", "CLASS", "TITLE", "ROUTE/FILE", "ID"];
   const widths = [
     Math.max(headers[0]!.length, ...rows.map((row) => row.severity.length)),
     Math.max(headers[1]!.length, ...rows.map((row) => row.confidence.length)),
     Math.max(headers[2]!.length, ...rows.map((row) => row.demo.length)),
-    Math.max(headers[3]!.length, ...rows.map((row) => row.title.length)),
-    Math.max(headers[4]!.length, ...rows.map((row) => row.target.length)),
-    Math.max(headers[5]!.length, ...rows.map((row) => row.id.length)),
+    Math.max(headers[3]!.length, ...rows.map((row) => row.class.length)),
+    Math.max(headers[4]!.length, ...rows.map((row) => row.title.length)),
+    Math.max(headers[5]!.length, ...rows.map((row) => row.target.length)),
+    Math.max(headers[6]!.length, ...rows.map((row) => row.id.length)),
   ];
 
   lines.push(formatRow(headers, widths));
@@ -75,7 +77,7 @@ export function formatFindingsTable(
   for (const row of rows) {
     lines.push(
       formatRow(
-        [row.severity, row.confidence, row.demo, row.title, row.target, row.id],
+        [row.severity, row.confidence, row.demo, row.class, row.title, row.target, row.id],
         widths,
       ),
     );
@@ -144,14 +146,13 @@ export function formatFindingExplanation(
   lines.push("");
   lines.push("Ranking rationale");
   for (const factor of finding.ranking_rationale.factors) {
-    lines.push(`  - ${factor}`);
+    lines.push(`  - ${formatRankingFactor(factor, finding)}`);
   }
-  lines.push(`  Total score: ${finding.ranking_rationale.total_score.toFixed(2)}`);
+  lines.push(`  Weighted score: ${finding.ranking_rationale.total_score.toFixed(3)}`);
   lines.push("");
   lines.push("Contributors");
-  lines.push(`  Agents: ${finding.contributing_agents.join(", ") || "—"}`);
   lines.push(`  Specialists: ${finding.contributing_specialists.join(", ") || "—"}`);
-  lines.push(`  Skills: ${finding.selected_skills.join(", ") || "—"}`);
+  lines.push(`  Playbooks: ${finding.selected_skills.join(", ") || "—"}`);
 
   return lines.join("\n");
 }
@@ -240,6 +241,31 @@ function formatEvidenceLocation(item: VerifiedFinding["evidence"][number]): stri
     return item.path;
   }
   return item.route ?? "unknown";
+}
+
+function formatRankingFactor(factor: string, finding: VerifiedFinding): string {
+  const legacyMatch = factor.match(/^total score=([\d.]+)\s*->\s*severity\s+(\w+)$/i);
+  if (legacyMatch) {
+    const score = legacyMatch[1]!;
+    const severity = legacyMatch[2]!;
+    if (
+      finding.vulnerability_class === "secret-exposure" &&
+      severity === "critical" &&
+      finding.severity === "critical"
+    ) {
+      return `Severity critical: secret-exposure class override (weighted score ${score} alone would rank lower)`;
+    }
+    return `Weighted score ${score} maps to severity ${severity}`;
+  }
+
+  const overrideMatch = factor.match(
+    /^severity (\w+): secret-exposure with (\w+) confidence overrides numeric score \(([\d.]+)\) to critical$/i,
+  );
+  if (overrideMatch) {
+    return factor;
+  }
+
+  return factor;
 }
 
 function formatRow(cells: string[], widths: number[]): string {

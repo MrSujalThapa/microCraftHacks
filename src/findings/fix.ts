@@ -24,7 +24,6 @@ const FIX_TEMPLATES: Record<string, FixTemplate> = {
     validation: [
       "Confirm affected files no longer contain credential-like literals.",
       "Verify runtime reads secrets from environment or secret manager.",
-      "Rotate any exposed credentials at the provider.",
       "Ensure .env is listed in .gitignore and never committed.",
       "Keep .env.example with placeholder values only.",
     ],
@@ -192,13 +191,13 @@ function buildSecretRemediationChanges(finding: VerifiedFinding): string[] {
       changes.push(`Rotate any exposed credentials referenced in ${file}.`);
     }
     changes.push(`Ensure ${file} is listed in .gitignore and never committed again.`);
-    changes.push(`Keep ${envExamplePath(file)} with placeholder values only (for example ${placeholderKey(keyNames)}=<REDACTED_SECRET>).`);
+    changes.push(`Keep ${envExamplePath(file)} with placeholder values only (for example ${placeholderKey(keyNames)}=<your-secret-here>).`);
     changes.push(`Load live values from runtime environment variables or a secret manager instead of ${file}.`);
   }
 
   if (changes.length === 0) {
     changes.push("Remove committed secret values from tracked configuration files and purge from git history.");
-    changes.push("Rotate any exposed credentials at the provider.");
+    changes.push("Rotate any exposed credential keys at the provider (never rotate placeholder redaction tokens).");
     changes.push("Ensure .env and other secret files are listed in .gitignore.");
     changes.push("Keep .env.example with placeholder values only.");
     changes.push("Load credentials from runtime environment variables or a secret manager.");
@@ -228,7 +227,7 @@ function collectSecretKeyNames(finding: VerifiedFinding): string[] {
     /\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE[_-]?KEY))\b/g;
 
   for (const item of finding.evidence) {
-    if (item.symbol && !item.symbol.startsWith("NEXT_PUBLIC_")) {
+    if (item.symbol && !item.symbol.startsWith("NEXT_PUBLIC_") && isRealSecretKeyName(item.symbol)) {
       keys.add(item.symbol);
     }
     for (const source of [item.explanation, item.snippet, finding.claim]) {
@@ -236,12 +235,25 @@ function collectSecretKeyNames(finding: VerifiedFinding): string[] {
         continue;
       }
       for (const match of source.matchAll(keyPattern)) {
-        keys.add(match[1]!);
+        const keyName = match[1]!;
+        if (isRealSecretKeyName(keyName)) {
+          keys.add(keyName);
+        }
       }
     }
   }
 
   return [...keys];
+}
+
+function isRealSecretKeyName(key: string): boolean {
+  if (key === "REDACTED_SECRET" || key.startsWith("REDACTED")) {
+    return false;
+  }
+  if (/^API_KEY$/i.test(key) && key === "API_KEY") {
+    return true;
+  }
+  return key.length > 0;
 }
 
 function isEnvLikePath(path: string): boolean {

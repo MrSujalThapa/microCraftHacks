@@ -85,12 +85,12 @@ export function readActivationSummary(
 
 export function printActivationSummary(summary: ActivationSummary): void {
   console.log("");
-  console.log("Activation summary (skills ≠ agents):");
-  console.log(`  skillsRouted: ${summary.skillsRouted}`);
-  console.log(`  agentsPlanned: ${summary.agentsPlanned}`);
-  console.log(`  agentsRun: ${summary.agentsRun}`);
+  console.log("Activation summary (playbooks ≠ specialists):");
+  console.log(`  playbooksRouted: ${summary.skillsRouted}`);
+  console.log(`  specialistsPlanned: ${summary.agentsPlanned}`);
+  console.log(`  specialistsRun: ${summary.agentsRun}`);
   console.log(
-    `  agentTypes: ${summary.agentTypes.length > 0 ? summary.agentTypes.join(", ") : "none"}`,
+    `  specialistTypes: ${summary.agentTypes.length > 0 ? summary.agentTypes.join(", ") : "none"}`,
   );
   console.log(`  findingsVerified: ${summary.findingsVerified}`);
   console.log(`  findingsRejected: ${summary.findingsRejected}`);

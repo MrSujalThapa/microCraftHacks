@@ -12,7 +12,7 @@ describe("formatFindingsTable", () => {
     expect(output).toContain("DEMO");
     expect(output).toContain("TITLE");
     expect(output).toContain("ROUTE/FILE");
-    expect(output).toContain("ID");
+    expect(output).toContain("CLASS");
     expect(output).toContain("high");
     expect(output).toContain("verified-draft-auth-1");
     expect(output).toContain("/api/login");

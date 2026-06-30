@@ -98,6 +98,15 @@ def _mock_destructive_score(finding: VerifiedFinding) -> tuple[float, str]:
     return score, f"mock-destructive potential={score:.2f}"
 
 
+def _severity_factor(total: float, severity: Severity, finding: VerifiedFinding) -> str:
+    if finding.vulnerability_class == "secret-exposure" and finding.confidence in {"high", "medium"}:
+        return (
+            f"severity {severity}: secret-exposure with {finding.confidence} confidence "
+            f"overrides numeric score ({total:.3f}) to critical"
+        )
+    return f"weighted score {total:.3f} maps to severity {severity}"
+
+
 def _severity_from_score(total: float, finding: VerifiedFinding) -> Severity:
     if finding.vulnerability_class == "secret-exposure" and finding.confidence in {"high", "medium"}:
         return "critical"
@@ -144,7 +153,7 @@ def rank_finding(finding: VerifiedFinding) -> VerifiedFinding:
             surface_factor,
             verification_factor,
             mock_factor,
-            f"total score={total:.3f} -> severity {severity}",
+            _severity_factor(total, severity, finding),
         ],
     )
     return replace(finding, severity=severity, ranking_rationale=rationale)

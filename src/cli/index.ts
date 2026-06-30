@@ -7,6 +7,7 @@ import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
 import { runAgentsRunCommand } from "./agents";
+import { runDemoCliCommand } from "./demo";
 import { runFindingsExplainCommand, runFindingsFixCommand, runFindingsListCommand } from "./findings";
 import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
@@ -114,11 +115,31 @@ agentsCommand
   );
 
 program
+  .command("demo [target]")
+  .description("Run scan → route playbooks → demo specialists → show demo-ready findings")
+  .option("--provider <name>", "Model provider: openai, mock, or local")
+  .option("--model <name>", "Model name when using an LLM provider")
+  .option("--from-cache", "Replay cached demo findings without model calls")
+  .action(
+    (
+      target: string | undefined,
+      options: {
+        provider?: "openai" | "mock" | "local";
+        model?: string;
+        fromCache?: boolean;
+      },
+    ) => {
+      runDemoCliCommand({ target, ...options });
+    },
+  );
+
+program
   .command("findings")
   .description("List verified findings from the latest findings report")
   .option("--report <path>", "Path to findings report JSON")
   .option("--demo", "Show only demo-ready verified findings")
-  .action((options: { report?: string; demo?: boolean }) => {
+  .option("--best", "Print the best demo-ready finding ID and follow-up commands")
+  .action((options: { report?: string; demo?: boolean; best?: boolean }) => {
     runFindingsListCommand(options);
   });
 
