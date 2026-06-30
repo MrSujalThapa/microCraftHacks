@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from cyber_swarm.evidence.env_config import is_env_config_path
+
 PYTHON_DEF = re.compile(r"^\s*def\s+(\w+)")
 PYTHON_DECORATOR_ROUTE = re.compile(
     r"^\s*@(?:app|router)\.(get|post|put|patch|delete|route|api_route)\(\s*[\"']([^\"']+)"
@@ -149,12 +151,12 @@ def extract_config_symbols(lines: list[str], path: str) -> list[SymbolHit]:
 
 def extract_symbols(lines: list[str], path: str) -> list[SymbolHit]:
     lower = path.lower()
+    if is_env_config_path(path):
+        return extract_config_symbols(lines, path)
     if lower.endswith(".py"):
         return extract_python_symbols(lines)
     if lower.endswith((".ts", ".tsx", ".js", ".jsx")):
         return extract_typescript_symbols(lines)
-    if lower.endswith((".env", ".env.example", ".env.local")) or "config" in lower:
-        return extract_config_symbols(lines, path)
-    if lower.endswith(".json"):
+    if "config" in lower or lower.endswith(".json"):
         return extract_config_symbols(lines, path)
     return []

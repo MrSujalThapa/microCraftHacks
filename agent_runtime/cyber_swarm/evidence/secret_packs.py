@@ -28,7 +28,9 @@ _SENSITIVE_TOKEN = re.compile(
 
 def is_credential_env_key(symbol: str) -> bool:
     upper = symbol.upper()
-    if upper.startswith("NEXT_PUBLIC_"):
+    if upper.startswith(("NEXT_PUBLIC_", "VITE_", "PUBLIC_", "REACT_APP_")):
+        return False
+    if "ANON" in upper and "KEY" in upper:
         return False
     return any(marker in upper for marker in CREDENTIAL_KEY_MARKERS)
 

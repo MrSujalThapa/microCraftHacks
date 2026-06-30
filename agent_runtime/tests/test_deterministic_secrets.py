@@ -70,4 +70,5 @@ def test_build_deterministic_secret_drafts_from_env_key_pack(tmp_path: Path):
     assert draft.evidence[0].path == "backend/.env"
     assert "SUPABASE_SERVICE_ROLE_KEY" in draft.title
     assert draft.evidence[0].line_start is not None
+    assert "SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>" in (draft.evidence[0].snippet or "")
     assert "super-secret-service-role" not in redact_secrets(draft.evidence[0].snippet or "")
