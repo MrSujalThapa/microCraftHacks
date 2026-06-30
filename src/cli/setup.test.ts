@@ -8,7 +8,7 @@ import { loadConfig } from "../config/load";
 import { getConfigPath } from "../config/paths";
 import { getDoctorConfigStatus } from "../config/status";
 import type { SwarmConfig } from "../config/types";
-import { readMaskedInput, runSetup, type SetupPrompter } from "./setup";
+import { getDefaultEditorCommand, readMaskedInput, runSetup, type SetupPrompter } from "./setup";
 
 const tempRoots: string[] = [];
 const originalOpenAiKey = process.env.OPENAI_API_KEY;
@@ -66,11 +66,25 @@ function fakeIndex(root: string, config: SwarmConfig) {
 
 function interactivePrompter(apiKey: string): SetupPrompter {
   return {
-    async text(): Promise<string> {
-      throw new Error("visible text prompt should not run");
+    async text(_question: string, defaultValue: string): Promise<string> {
+      return defaultValue;
     },
     async secret(): Promise<string> {
       return apiKey;
+    },
+    async confirm(): Promise<boolean> {
+      return false;
+    },
+  };
+}
+
+function editorFallbackPrompter(): SetupPrompter {
+  return {
+    async text(_question: string, defaultValue: string): Promise<string> {
+      return defaultValue;
+    },
+    async secret(): Promise<string> {
+      throw new Error("This terminal cannot enable hidden API key input.");
     },
     async confirm(): Promise<boolean> {
       return false;
@@ -137,7 +151,7 @@ describe("runSetup", () => {
 
     expect(readFileSync(join(root, ".env"), "utf8")).toContain(`OPENAI_API_KEY=${apiKey}`);
     expect(lines.join("\n")).not.toContain(apiKey);
-    expect(lines.join("\n")).toContain("OpenAI API key saved: sk-...1234");
+    expect(lines.join("\n")).toContain("OpenAI API key: found");
   });
 
   it("interactive setup does not write the raw key to output", async () => {
@@ -162,7 +176,7 @@ describe("runSetup", () => {
     expect(readFileSync(join(root, ".env"), "utf8")).toContain(`OPENAI_API_KEY=${apiKey}`);
     expect(outputLines.join("\n")).not.toContain(apiKey);
     expect(warningLines.join("\n")).not.toContain(apiKey);
-    expect(outputLines.join("\n")).toContain("OpenAI API key saved: sk-...1234");
+    expect(outputLines.join("\n")).toContain("OpenAI API key: found");
   });
 
   it("interactive setup uses provider/model defaults before hidden key entry", async () => {
@@ -188,6 +202,37 @@ describe("runSetup", () => {
     expect(readFileSync(join(root, ".env"), "utf8")).toContain(`OPENAI_API_KEY=${apiKey}`);
   });
 
+  it("asks provider and model before writing config", async () => {
+    const root = makeTempRoot();
+    const prompts: string[] = [];
+    const prompter: SetupPrompter = {
+      async text(question: string, defaultValue: string): Promise<string> {
+        expect(existsSync(getConfigPath(root))).toBe(false);
+        prompts.push(question);
+        return defaultValue;
+      },
+      async secret(): Promise<string> {
+        expect(prompts).toEqual(["Provider", "Model"]);
+        expect(existsSync(getConfigPath(root))).toBe(false);
+        return "sk-before-write-secret-1234";
+      },
+      async confirm(): Promise<boolean> {
+        return false;
+      },
+    };
+
+    await runSetup(
+      {
+        skipSkillsSync: true,
+        skipSkillsIndex: true,
+      },
+      root,
+      { prompter, log: () => undefined },
+    );
+
+    expect(existsSync(getConfigPath(root))).toBe(true);
+  });
+
   it("masked prompt handles an existing key by showing only the masked key", async () => {
     const root = makeTempRoot();
     const lines: string[] = [];
@@ -200,14 +245,27 @@ describe("runSetup", () => {
         model: "gpt-5-mini",
         skipSkillsSync: true,
         skipSkillsIndex: true,
-        yes: true,
       },
       root,
-      { prompter: throwingPrompter(), log: (message) => lines.push(message) },
+      {
+        prompter: {
+          async text(_question: string, defaultValue: string): Promise<string> {
+            return defaultValue;
+          },
+          async secret(): Promise<string> {
+            throw new Error("unexpected secret prompt");
+          },
+          async confirm(): Promise<boolean> {
+            return true;
+          },
+        },
+        log: (message) => lines.push(message),
+      },
     );
 
     const output = lines.join("\n");
-    expect(output).toContain("OpenAI API key already found: sk-...abcd");
+    expect(output).toContain("OpenAI API key found: sk-...abcd");
+    expect(output).toContain("OpenAI API key: found");
     expect(output).not.toContain(apiKey);
   });
 
@@ -262,7 +320,9 @@ describe("runSetup", () => {
       ),
     ).rejects.toThrow("Model value looks like a secret");
 
-    expect(readFileSync(getConfigPath(root), "utf8")).not.toContain(pastedKey);
+    if (existsSync(getConfigPath(root))) {
+      expect(readFileSync(getConfigPath(root), "utf8")).not.toContain(pastedKey);
+    }
   });
 
   it("preserves existing .env lines", async () => {
@@ -351,7 +411,35 @@ describe("runSetup", () => {
     expect(indexCalls).toBe(1);
   });
 
-  it("non-TTY setup without key fails clearly", async () => {
+  it("when hidden input is unavailable, setup falls back to editor flow", async () => {
+    const root = makeTempRoot();
+    const lines: string[] = [];
+    let openedEnvPath = "";
+
+    await runSetup(
+      {
+        skipSkillsSync: true,
+        skipSkillsIndex: true,
+      },
+      root,
+      {
+        prompter: editorFallbackPrompter(),
+        log: (message) => lines.push(message),
+        openEditor: (_root, envPath) => {
+          openedEnvPath = envPath;
+          writeFileSync(envPath, "OPENAI_API_KEY=sk-editor-secret-1234\n", "utf8");
+        },
+      },
+    );
+
+    expect(openedEnvPath).toBe(join(root, ".env"));
+    expect(readFileSync(join(root, ".env"), "utf8")).toContain("OPENAI_API_KEY=sk-editor-secret-1234");
+    expect(lines.join("\n")).toContain("Hidden input is unavailable in this terminal.");
+    expect(lines.join("\n")).toContain("OpenAI API key: found");
+    expect(lines.join("\n")).not.toContain("sk-editor-secret-1234");
+  });
+
+  it("non-interactive setup without key fails clearly", async () => {
     const root = makeTempRoot();
 
     await expect(
@@ -361,11 +449,12 @@ describe("runSetup", () => {
           model: "gpt-5-mini",
           skipSkillsSync: true,
           skipSkillsIndex: true,
+          yes: true,
         },
         root,
         { log: () => undefined },
       ),
-    ).rejects.toThrow("Interactive API key entry requires a TTY");
+    ).rejects.toThrow("OPENAI_API_KEY is required");
   });
 
   it("doctor sees configured provider, model, and key after setup", async () => {
@@ -389,6 +478,14 @@ describe("runSetup", () => {
       model: "gpt-5-mini",
       openaiKeyPresent: true,
     });
+  });
+});
+
+describe("editor fallback", () => {
+  it("uses notepad as the default editor on Windows", () => {
+    if (process.platform === "win32") {
+      expect(getDefaultEditorCommand()).toMatchObject({ command: "notepad" });
+    }
   });
 });
 

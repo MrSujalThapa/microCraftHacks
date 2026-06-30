@@ -1,13 +1,14 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { emitKeypressEvents } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { loadDotEnv, upsertDotEnvValues } from "../config/env";
-import { initProject } from "../config/init";
-import { loadConfig } from "../config/load";
-import { getConfigPath } from "../config/paths";
+import { createDefaultConfig } from "../config/defaults";
+import { loadConfig, tryLoadConfig } from "../config/load";
+import { getConfigPath, getManagedDirectories } from "../config/paths";
 import { getDoctorConfigStatus } from "../config/status";
 import type { SwarmConfig, SwarmProvider } from "../config/types";
 import { containsRawSecret } from "../shared/redaction";
@@ -31,6 +32,7 @@ export interface SetupOptions {
   apiKey?: string;
   skipSkillsSync?: boolean;
   skipSkillsIndex?: boolean;
+  editor?: boolean;
   yes?: boolean;
 }
 
@@ -46,6 +48,7 @@ export interface SetupDependencies {
   warn?: (message: string) => void;
   sync?: typeof syncSkills;
   index?: typeof buildSkillsIndex;
+  openEditor?: (root: string, envPath: string) => void;
 }
 
 interface SecretInput {
@@ -116,7 +119,89 @@ function getOpenAiKeyFromEnvironment(root: string): string | undefined {
 }
 
 function writeConfig(config: SwarmConfig, root: string): void {
-  writeFileSync(getConfigPath(root), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  const configPath = getConfigPath(root);
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function ensureManagedDirectories(root: string, config: SwarmConfig): void {
+  for (const relativePath of getManagedDirectories(config)) {
+    mkdirSync(join(root, relativePath), { recursive: true });
+  }
+}
+
+function readDotEnvValue(root: string, keyName: string): string | undefined {
+  const envPath = join(root, ".env");
+  if (!existsSync(envPath)) {
+    return undefined;
+  }
+
+  const content = readFileSync(envPath, "utf8");
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const separator = line.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = line.slice(0, separator).trim();
+    if (key !== keyName) {
+      continue;
+    }
+    let value = line.slice(separator + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    return value || undefined;
+  }
+  return undefined;
+}
+
+function ensureEnvForEditor(root: string): string {
+  const envPath = join(root, ".env");
+  if (!existsSync(envPath)) {
+    writeFileSync(envPath, "OPENAI_API_KEY=\n", "utf8");
+    return envPath;
+  }
+
+  const content = readFileSync(envPath, "utf8");
+  const hasOpenAiKey = content
+    .split(/\r?\n/u)
+    .some((line) => line.trim().startsWith("OPENAI_API_KEY="));
+  if (!hasOpenAiKey) {
+    const prefix = content.length > 0 && !/\r?\n$/u.test(content) ? "\n" : "";
+    writeFileSync(envPath, `${content}${prefix}OPENAI_API_KEY=\n`, "utf8");
+  }
+  return envPath;
+}
+
+export function getDefaultEditorCommand(): { command: string; args: string[] } {
+  if (process.platform === "win32") {
+    return { command: "notepad", args: [] };
+  }
+  const editor = process.env.VISUAL || process.env.EDITOR || "vi";
+  return { command: editor, args: [] };
+}
+
+function openEnvEditor(root: string, envPath: string): void {
+  const editor = getDefaultEditorCommand();
+  const result = spawnSync(editor.command, [...editor.args, envPath], {
+    cwd: root,
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  });
+
+  if (result.error) {
+    throw new Error(`Failed to open editor: ${result.error.message}`);
+  }
+  if (typeof result.status === "number" && result.status !== 0) {
+    throw new Error(`Editor exited with code ${result.status}`);
+  }
 }
 
 export async function readMaskedInput(
@@ -201,6 +286,62 @@ export async function readMaskedInput(
   });
 }
 
+async function collectOpenAiKey(
+  root: string,
+  options: SetupOptions,
+  prompter: SetupPrompter,
+  log: (message: string) => void,
+  openEditor: (root: string, envPath: string) => void,
+  prompt: boolean,
+): Promise<{ key?: string; source: "provided" | "existing" | "entered" | "editor" | "missing" }> {
+  const providedKey = options.apiKey?.trim();
+  if (providedKey) {
+    return { key: providedKey, source: "provided" };
+  }
+
+  const existingKey = getOpenAiKeyFromEnvironment(root);
+  if (existingKey) {
+    if (!prompt) {
+      return { key: existingKey, source: "existing" };
+    }
+    log(`OpenAI API key found: ${maskApiKey(existingKey)}`);
+    const keepExisting = await prompter.confirm("Keep existing OpenAI API key", true);
+    if (keepExisting) {
+      return { key: existingKey, source: "existing" };
+    }
+  }
+
+  if (!prompt) {
+    return { source: "missing" };
+  }
+
+  if (!options.editor) {
+    try {
+      const enteredKey = await prompter.secret("OpenAI API key (input hidden)");
+      if (enteredKey) {
+        return { key: enteredKey, source: "entered" };
+      }
+    } catch (error) {
+      if (!(error instanceof Error) || (!error.message.includes("hidden API key input") && !error.message.includes("hidden input"))) {
+        throw error;
+      }
+    }
+  }
+
+  log("Hidden input is unavailable in this terminal.");
+  log("Opening .env in your editor so you can paste the key safely.");
+  const envPath = ensureEnvForEditor(root);
+  openEditor(root, envPath);
+
+  delete process.env.OPENAI_API_KEY;
+  const editedKey = readDotEnvValue(root, "OPENAI_API_KEY") ?? getOpenAiKeyFromEnvironment(root);
+  if (!editedKey) {
+    throw new Error("OPENAI_API_KEY was not found in .env after editor closed.");
+  }
+  process.env.OPENAI_API_KEY = editedKey;
+  return { key: editedKey, source: "editor" };
+}
+
 function createTerminalPrompter(): SetupPrompter {
   async function askText(question: string): Promise<string> {
     const rl = createInterface({ input, output });
@@ -261,27 +402,41 @@ export async function runSetup(
   const prompter = dependencies.prompter ?? createTerminalPrompter();
   const sync = dependencies.sync ?? syncSkills;
   const index = dependencies.index ?? buildSkillsIndex;
+  const openEditor = dependencies.openEditor ?? openEnvEditor;
   const prompt = shouldPrompt(options);
 
-  const initResult = initProject(root);
-  if (initResult.configCreated) {
-    log("Created .swarm/config.json");
-  } else {
-    log("Using existing .swarm/config.json");
+  if (prompt) {
+    log("Cyber Swarm setup");
+    log("Press Enter to accept defaults.");
   }
 
-  const existingConfig = loadConfig(root);
+  const configPath = getConfigPath(root);
+  const configExists = existsSync(configPath);
+  const existingConfig = tryLoadConfig(root) ?? createDefaultConfig(root);
   const providerInput =
     options.provider ??
+    (prompt ? await prompter.text("Provider", existingConfig.provider || DEFAULT_PROVIDER) : undefined) ??
     existingConfig.provider ??
     DEFAULT_PROVIDER;
   const provider = parseProvider(providerInput);
 
   const modelInput =
     options.model ??
+    (prompt ? await prompter.text("Model", existingConfig.model || DEFAULT_MODEL) : undefined) ??
     existingConfig.model ??
     DEFAULT_MODEL;
   const model = normalizeModel(modelInput);
+
+  const keyResult =
+    provider === "openai"
+      ? await collectOpenAiKey(root, options, prompter, log, openEditor, prompt)
+      : { source: "missing" as const };
+
+  if (provider === "openai" && !keyResult.key) {
+    throw new Error(
+      "OPENAI_API_KEY is required for the openai provider. Set it in .env, or pass --api-key for CI/automation.",
+    );
+  }
 
   const config: SwarmConfig = {
     ...existingConfig,
@@ -289,33 +444,19 @@ export async function runSetup(
     model,
   };
   writeConfig(config, root);
-  log(`Configured provider ${provider}`);
-  log(`Configured model ${model}`);
+  ensureManagedDirectories(root, config);
+  log(configExists ? "Using existing .swarm/config.json" : "Created .swarm/config.json");
+  log(`Configured provider: ${provider}`);
+  log(`Configured model: ${model}`);
 
   ensureGitIgnoreContainsEnv(root, log);
 
-  const existingKey = getOpenAiKeyFromEnvironment(root);
-  const providedKey = options.apiKey?.trim();
-
   if (provider === "openai") {
-    if (providedKey) {
-      upsertDotEnvValues(root, { OPENAI_API_KEY: providedKey });
-      log(`OpenAI API key saved: ${maskApiKey(providedKey)}`);
-    } else if (existingKey) {
-      log(`OpenAI API key already found: ${maskApiKey(existingKey)}`);
-    } else if (prompt) {
-      const apiKey = await prompter.secret("OpenAI API key (input hidden)");
-      if (!apiKey) {
-        throw new Error("OPENAI_API_KEY is required for the openai provider.");
-      }
-      upsertDotEnvValues(root, { OPENAI_API_KEY: apiKey });
-      log(`OpenAI API key saved: ${maskApiKey(apiKey)}`);
-    } else {
-      throw new Error(
-        "OPENAI_API_KEY is required for the openai provider. Set it in .env, or use --api-key only for automation.",
-      );
+    if (keyResult.source === "provided" || keyResult.source === "entered") {
+      upsertDotEnvValues(root, { OPENAI_API_KEY: keyResult.key });
     }
-  } else if (providedKey) {
+    log("OpenAI API key: found");
+  } else if (options.apiKey?.trim()) {
     warn("Ignoring --api-key because provider is not openai.");
   }
 

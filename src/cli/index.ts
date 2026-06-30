@@ -40,6 +40,7 @@ program
   .option("--api-key <key>", "OpenAI API key to save locally")
   .option("--skip-skills-sync", "Do not sync the external skills repo")
   .option("--skip-skills-index", "Do not build the skills index")
+  .option("--editor", "Use editor-based OpenAI API key entry")
   .option("--yes", "Accept defaults and run non-interactively")
   .action(
     (options: {
@@ -48,6 +49,7 @@ program
       apiKey?: string;
       skipSkillsSync?: boolean;
       skipSkillsIndex?: boolean;
+      editor?: boolean;
       yes?: boolean;
     }) => runSetupCommand(options),
   );
