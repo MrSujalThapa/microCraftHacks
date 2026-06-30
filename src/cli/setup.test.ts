@@ -1,13 +1,14 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { loadConfig } from "../config/load";
 import { getConfigPath } from "../config/paths";
 import { getDoctorConfigStatus } from "../config/status";
 import type { SwarmConfig } from "../config/types";
-import { runSetup, type SetupPrompter } from "./setup";
+import { readMaskedInput, runSetup, type SetupPrompter } from "./setup";
 
 const tempRoots: string[] = [];
 const originalOpenAiKey = process.env.OPENAI_API_KEY;
@@ -60,6 +61,20 @@ function fakeIndex(root: string, config: SwarmConfig) {
       skills: [],
     },
     skipped: [],
+  };
+}
+
+function interactivePrompter(apiKey: string): SetupPrompter {
+  return {
+    async text(_question: string, defaultValue: string): Promise<string> {
+      return defaultValue;
+    },
+    async secret(): Promise<string> {
+      return apiKey;
+    },
+    async confirm(): Promise<boolean> {
+      return false;
+    },
   };
 }
 
@@ -122,7 +137,55 @@ describe("runSetup", () => {
 
     expect(readFileSync(join(root, ".env"), "utf8")).toContain(`OPENAI_API_KEY=${apiKey}`);
     expect(lines.join("\n")).not.toContain(apiKey);
-    expect(lines.join("\n")).toContain("sk-...1234");
+    expect(lines.join("\n")).toContain("OpenAI API key saved: sk-...1234");
+  });
+
+  it("interactive setup does not write the raw key to output", async () => {
+    const root = makeTempRoot();
+    const outputLines: string[] = [];
+    const warningLines: string[] = [];
+    const apiKey = "sk-interactive-secret-1234";
+
+    await runSetup(
+      {
+        provider: "openai",
+        model: "gpt-5-mini",
+      },
+      root,
+      {
+        prompter: interactivePrompter(apiKey),
+        log: (message) => outputLines.push(message),
+        warn: (message) => warningLines.push(message),
+      },
+    );
+
+    expect(readFileSync(join(root, ".env"), "utf8")).toContain(`OPENAI_API_KEY=${apiKey}`);
+    expect(outputLines.join("\n")).not.toContain(apiKey);
+    expect(warningLines.join("\n")).not.toContain(apiKey);
+    expect(outputLines.join("\n")).toContain("OpenAI API key saved: sk-...1234");
+  });
+
+  it("masked prompt handles an existing key by showing only the masked key", async () => {
+    const root = makeTempRoot();
+    const lines: string[] = [];
+    const apiKey = "sk-existing-secret-abcd";
+    writeFileSync(join(root, ".env"), `OPENAI_API_KEY=${apiKey}\n`, "utf8");
+
+    await runSetup(
+      {
+        provider: "openai",
+        model: "gpt-5-mini",
+        skipSkillsSync: true,
+        skipSkillsIndex: true,
+        yes: true,
+      },
+      root,
+      { prompter: throwingPrompter(), log: (message) => lines.push(message) },
+    );
+
+    const output = lines.join("\n");
+    expect(output).toContain("OpenAI API key already found: sk-...abcd");
+    expect(output).not.toContain(apiKey);
   });
 
   it("preserves existing .env lines", async () => {
@@ -211,6 +274,23 @@ describe("runSetup", () => {
     expect(indexCalls).toBe(1);
   });
 
+  it("non-TTY setup without key fails clearly", async () => {
+    const root = makeTempRoot();
+
+    await expect(
+      runSetup(
+        {
+          provider: "openai",
+          model: "gpt-5-mini",
+          skipSkillsSync: true,
+          skipSkillsIndex: true,
+        },
+        root,
+        { log: () => undefined },
+      ),
+    ).rejects.toThrow("Interactive API key entry requires a TTY");
+  });
+
   it("doctor sees configured provider, model, and key after setup", async () => {
     const root = makeTempRoot();
 
@@ -232,5 +312,87 @@ describe("runSetup", () => {
       model: "gpt-5-mini",
       openaiKeyPresent: true,
     });
+  });
+});
+
+describe("readMaskedInput", () => {
+  it("does not echo raw typed characters and restores raw mode", async () => {
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      readableEncoding: BufferEncoding | null;
+      setRawMode: (mode: boolean) => void;
+      setEncoding: (encoding: BufferEncoding) => void;
+      resume: () => void;
+      pause: () => void;
+    };
+    const writes: string[] = [];
+    const output = {
+      isTTY: true,
+      write(chunk: string) {
+        writes.push(chunk);
+        return true;
+      },
+    };
+    const rawModes: boolean[] = [];
+
+    input.isTTY = true;
+    input.isRaw = false;
+    input.readableEncoding = null;
+    input.setRawMode = (mode: boolean) => {
+      rawModes.push(mode);
+      input.isRaw = mode;
+    };
+    input.setEncoding = (encoding: BufferEncoding) => {
+      input.readableEncoding = encoding;
+    };
+    input.resume = () => undefined;
+    input.pause = () => undefined;
+
+    const promise = readMaskedInput(input, output as never, "OpenAI API key");
+    input.emit("data", "sk-visible-secret-1234");
+    input.emit("data", "\r");
+
+    await expect(promise).resolves.toBe("sk-visible-secret-1234");
+    expect(writes.join("")).toBe("OpenAI API key: \n");
+    expect(writes.join("")).not.toContain("sk-visible-secret-1234");
+    expect(rawModes).toEqual([true, false]);
+  });
+
+  it("handles Backspace", async () => {
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      readableEncoding: BufferEncoding | null;
+      setRawMode: (mode: boolean) => void;
+      setEncoding: (encoding: BufferEncoding) => void;
+      resume: () => void;
+      pause: () => void;
+    };
+    const output = {
+      isTTY: true,
+      write() {
+        return true;
+      },
+    };
+
+    input.isTTY = true;
+    input.isRaw = false;
+    input.readableEncoding = null;
+    input.setRawMode = (mode: boolean) => {
+      input.isRaw = mode;
+    };
+    input.setEncoding = (encoding: BufferEncoding) => {
+      input.readableEncoding = encoding;
+    };
+    input.resume = () => undefined;
+    input.pause = () => undefined;
+
+    const promise = readMaskedInput(input, output as never, "OpenAI API key");
+    input.emit("data", "sk-old");
+    input.emit("data", "\u007f\u007f\u007fnew\r");
+
+    await expect(promise).resolves.toBe("sk-new");
+    expect(input.isRaw).toBe(false);
   });
 });

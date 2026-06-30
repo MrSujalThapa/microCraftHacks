@@ -3,7 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { resolve } from "node:path";
 
-import { ENV_RELATIVE_PATH, loadDotEnv, upsertDotEnvValues } from "../config/env";
+import { loadDotEnv, upsertDotEnvValues } from "../config/env";
 import { initProject } from "../config/init";
 import { loadConfig } from "../config/load";
 import { getConfigPath } from "../config/paths";
@@ -16,6 +16,9 @@ import { printCliError } from "./errors";
 const DEFAULT_PROVIDER: SwarmProvider = "openai";
 const DEFAULT_MODEL = "gpt-5-mini";
 const PROVIDERS = new Set<SwarmProvider>(["openai", "mock", "local"]);
+
+const NON_TTY_SECRET_ERROR =
+  "Interactive API key entry requires a TTY so the key can stay hidden. Set OPENAI_API_KEY in .env, or use --api-key only for automation.";
 
 export interface SetupOptions {
   provider?: string;
@@ -38,6 +41,29 @@ export interface SetupDependencies {
   warn?: (message: string) => void;
   sync?: typeof syncSkills;
   index?: typeof buildSkillsIndex;
+}
+
+interface SecretInput {
+  isTTY?: boolean;
+  isRaw?: boolean;
+  readableEncoding?: BufferEncoding | null;
+  setRawMode?: (mode: boolean) => unknown;
+  resume: () => unknown;
+  pause: () => unknown;
+  setEncoding: (encoding: BufferEncoding) => unknown;
+  on: {
+    (event: "data", listener: (chunk: Buffer | string) => void): unknown;
+    (event: "error", listener: (error: Error) => void): unknown;
+  };
+  off: {
+    (event: "data", listener: (chunk: Buffer | string) => void): unknown;
+    (event: "error", listener: (error: Error) => void): unknown;
+  };
+}
+
+interface SecretOutput {
+  isTTY?: boolean;
+  write: (chunk: string) => unknown;
 }
 
 function parseProvider(value: string): SwarmProvider {
@@ -69,6 +95,84 @@ function writeConfig(config: SwarmConfig, root: string): void {
   writeFileSync(getConfigPath(root), `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
+export async function readMaskedInput(
+  secretInput: SecretInput,
+  secretOutput: SecretOutput,
+  question: string,
+): Promise<string> {
+  if (!secretInput.isTTY || !secretOutput.isTTY || typeof secretInput.setRawMode !== "function") {
+    throw new Error(NON_TTY_SECRET_ERROR);
+  }
+
+  const setRawMode = secretInput.setRawMode;
+  const wasRaw = typeof secretInput.isRaw === "boolean" ? secretInput.isRaw : false;
+  const previousEncoding = secretInput.readableEncoding;
+
+  return await new Promise<string>((resolveSecret, rejectSecret) => {
+    let value = "";
+    let settled = false;
+
+    const cleanup = () => {
+      secretInput.off("data", onData);
+      secretInput.off("error", onError);
+      try {
+        setRawMode(wasRaw);
+      } finally {
+        if (previousEncoding) {
+          secretInput.setEncoding(previousEncoding);
+        }
+        secretInput.pause();
+      }
+    };
+
+    const finish = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      secretOutput.write("\n");
+      if (error) {
+        rejectSecret(error);
+      } else {
+        resolveSecret(value.trim());
+      }
+    };
+
+    const onError = (error: Error) => {
+      finish(error);
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      const text = chunk.toString("utf8");
+      for (const char of text) {
+        if (char === "\r" || char === "\n") {
+          finish();
+          return;
+        }
+        if (char === "\u0003") {
+          finish(new Error("Setup cancelled."));
+          return;
+        }
+        if (char === "\b" || char === "\u007f") {
+          value = value.slice(0, -1);
+          continue;
+        }
+        if (char >= " ") {
+          value += char;
+        }
+      }
+    };
+
+    secretOutput.write(`${question}: `);
+    setRawMode(true);
+    secretInput.resume();
+    secretInput.setEncoding("utf8");
+    secretInput.on("data", onData);
+    secretInput.on("error", onError);
+  });
+}
+
 function createTerminalPrompter(): SetupPrompter {
   async function askText(question: string): Promise<string> {
     const rl = createInterface({ input, output });
@@ -93,47 +197,7 @@ function createTerminalPrompter(): SetupPrompter {
       return answer === "y" || answer === "yes";
     },
     async secret(question: string): Promise<string> {
-      if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function") {
-        return (await askText(`${question}: `)).trim();
-      }
-
-      return await new Promise<string>((resolveSecret) => {
-        let value = "";
-        output.write(`${question}: `);
-        input.setRawMode(true);
-        input.resume();
-        input.setEncoding("utf8");
-
-        const onData = (chunk: string) => {
-          for (const char of chunk) {
-            if (char === "\r" || char === "\n") {
-              cleanup();
-              output.write("\n");
-              resolveSecret(value.trim());
-              return;
-            }
-            if (char === "\u0003") {
-              cleanup();
-              output.write("\n");
-              process.kill(process.pid, "SIGINT");
-              return;
-            }
-            if (char === "\b" || char === "\u007f") {
-              value = value.slice(0, -1);
-              continue;
-            }
-            value += char;
-          }
-        };
-
-        const cleanup = () => {
-          input.off("data", onData);
-          input.setRawMode(false);
-          input.pause();
-        };
-
-        input.on("data", onData);
-      });
+      return await readMaskedInput(input, output, question);
     },
   };
 }
@@ -209,18 +273,20 @@ export async function runSetup(
   if (provider === "openai") {
     if (providedKey) {
       upsertDotEnvValues(root, { OPENAI_API_KEY: providedKey });
-      log(`Saved OpenAI API key to ${ENV_RELATIVE_PATH} (${maskApiKey(providedKey)})`);
+      log(`OpenAI API key saved: ${maskApiKey(providedKey)}`);
     } else if (existingKey) {
-      log(`OpenAI API key already found (${maskApiKey(existingKey)})`);
+      log(`OpenAI API key already found: ${maskApiKey(existingKey)}`);
     } else if (prompt) {
       const apiKey = await prompter.secret("OpenAI API key");
       if (!apiKey) {
         throw new Error("OPENAI_API_KEY is required for the openai provider.");
       }
       upsertDotEnvValues(root, { OPENAI_API_KEY: apiKey });
-      log(`Saved OpenAI API key to ${ENV_RELATIVE_PATH} (${maskApiKey(apiKey)})`);
+      log(`OpenAI API key saved: ${maskApiKey(apiKey)}`);
     } else {
-      throw new Error("OPENAI_API_KEY is required for the openai provider. Pass --api-key or set it in .env.");
+      throw new Error(
+        "OPENAI_API_KEY is required for the openai provider. Set it in .env, or use --api-key only for automation.",
+      );
     }
   } else if (providedKey) {
     warn("Ignoring --api-key because provider is not openai.");
