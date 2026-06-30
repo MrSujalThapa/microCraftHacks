@@ -7,12 +7,12 @@ from cyber_swarm.models.retrieval import RetrievedContext
 from cyber_swarm.models.runtime import RuntimeInput
 
 SPECIALIST_BY_TARGET = {
-    "auth": "auth-breaker",
+    "auth": "auth-boundary",
     "api": "api-abuse",
     "secrets": "secrets-config",
     "dependency": "secrets-config",
-    "storage": "api-abuse",
-    "ai": "secrets-config",
+    "storage": "storage-access",
+    "ai": "ai-action-boundary",
     "config": "secrets-config",
 }
 
@@ -46,7 +46,7 @@ def run_attack_planner(
             AttackHypothesis(
                 id="hyp-auth-1",
                 agent_type="auth",
-                specialist="auth-breaker",
+                specialist="auth-boundary",
                 title="Auth boundary bypass or missing enforcement",
                 vulnerability_class="broken-access-control",
                 target_surfaces=auth_routes[:6] or ["/api/login"],
@@ -55,6 +55,23 @@ def run_attack_planner(
                 required_evidence=[
                     "auth middleware or guard implementation",
                     "route-to-handler mapping for protected endpoints",
+                ],
+                priority="high",
+            )
+        )
+        hypotheses.append(
+            AttackHypothesis(
+                id="hyp-ownership-1",
+                agent_type="auth",
+                specialist="object-ownership",
+                title="Missing object ownership check (BOLA/IDOR)",
+                vulnerability_class="bola",
+                target_surfaces=auth_routes[:6],
+                target_files=sorted(set(auth_files) & context_paths) or auth_files[:4],
+                reasoning="Auth boundary files may accept user-controlled IDs without ownership validation.",
+                required_evidence=[
+                    "handler accepting user/resource identifier",
+                    "data access call without ownership check",
                 ],
                 priority="high",
             )
@@ -140,9 +157,9 @@ def run_attack_planner(
             AttackHypothesis(
                 id="hyp-storage-1",
                 agent_type="storage",
-                specialist="api-abuse",
+                specialist="storage-access",
                 title="Storage or upload endpoint abuse",
-                vulnerability_class="api-abuse",
+                vulnerability_class="privilege-escalation",
                 target_surfaces=storage_routes[:8],
                 target_files=sorted(context_paths)[:3],
                 reasoning="Storage-related routes or stack signals were mapped during recon.",
@@ -163,9 +180,9 @@ def run_attack_planner(
             AttackHypothesis(
                 id="hyp-ai-1",
                 agent_type="ai",
-                specialist="secrets-config",
-                title="AI integration secrets or unsafe prompt handling",
-                vulnerability_class="secret-exposure",
+                specialist="ai-action-boundary",
+                title="AI integration action without approval gate",
+                vulnerability_class="ai-action-abuse",
                 target_surfaces=[],
                 target_files=sorted(set(ai_files) & context_paths) or ai_files[:4],
                 reasoning="AI/LLM integration signals were mapped during recon.",

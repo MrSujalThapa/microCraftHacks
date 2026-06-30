@@ -18,6 +18,9 @@ export function runAgentsCommand(options: {
   model?: string;
   mode?: string;
   fromCache?: boolean;
+  latency?: "fastest" | "balanced" | "thorough";
+  noLlm?: boolean;
+  forceLlm?: boolean;
 }): void {
   const root = resolve(process.cwd());
   const paths = resolveAgentRuntimePaths(root, {
@@ -30,12 +33,12 @@ export function runAgentsCommand(options: {
   const plannedAgents = planAgentsFromScanReport(scanReport);
   const skillsRouted = readRoutedSkillsCount(paths.routedSkillsPath);
 
-  console.log("Agent activation (from repo surfaces, not skill count):");
-  console.log(`  Planned agents: ${plannedAgents.length}`);
+  console.log("Specialist activation (playbooks supplement routing, not execution plan):");
+  console.log(`  Planned specialists: ${plannedAgents.length}`);
   for (const agent of plannedAgents) {
-    console.log(`    ${agent.agentType} → ${agent.specialist} — ${agent.reasons[0] ?? "surface match"}`);
+    console.log(`    ${agent.specialist} — ${agent.reasons[0] ?? "surface match"}`);
   }
-  console.log(`  Routed skills (supplemental): ${skillsRouted}`);
+  console.log(`  Playbooks routed (supplemental): ${skillsRouted}`);
 
   const result = runAgentRuntime({
     root,
@@ -46,11 +49,14 @@ export function runAgentsCommand(options: {
     model: options.model,
     mode: options.mode ?? "full",
     fromCache: options.fromCache,
+    latency: options.latency,
+    noLlm: options.noLlm,
+    forceLlm: options.forceLlm,
   });
 
   const activation = readActivationSummary(result.outputPath, skillsRouted);
 
-  console.log("Agent runtime complete.");
+  console.log("Specialist runtime complete.");
   console.log(`Provider: ${result.provider}`);
   console.log(`Model: ${result.model}`);
   if (result.runtimeMetrics?.mode) {

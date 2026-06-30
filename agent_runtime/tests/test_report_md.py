@@ -59,6 +59,8 @@ def _sample_output() -> dict:
                 },
                 "confidence": "medium",
                 "severity": "high",
+                "demo_ready": True,
+                "demo_reason": "High-confidence verified finding with strong ranking score",
                 "ranking_rationale": {
                     "total_score": 0.71,
                     "factors": ["High-impact auth surface"],
@@ -86,15 +88,26 @@ def test_build_markdown_report_includes_required_sections():
     markdown = build_markdown_report(_sample_output())
 
     assert "# Cyber Swarm Findings Report" in markdown
-    assert "## Summary" in markdown
+    assert "## Executive summary" in markdown
+    assert "## Target / scan summary" in markdown
     assert "## Severity counts" in markdown
-    assert "## Verified findings" in markdown
-    assert "## Rejected findings summary" in markdown
-    assert "**Evidence**" in markdown
+    assert "## Routed playbooks" in markdown
+    assert "## Activated specialists" in markdown
+    assert "## Demo-ready findings" in markdown
+    assert "## Rejected / downgraded findings" in markdown
+    assert "**Evidence (redacted)**" in markdown
     assert "**Safe reproduction**" in markdown
-    assert "**Suggested fix**" in markdown
+    assert "**Concrete fix plan**" in markdown
     assert "verified-draft-auth-1" in markdown
     assert "Speculative issue" in markdown
+
+
+def test_markdown_report_never_contains_raw_secrets():
+    output = _sample_output()
+    output["verifiedFindings"][0]["evidence"][0]["snippet"] = "SUPABASE_SERVICE_ROLE_KEY=super-secret-value"
+    markdown = build_markdown_report(output)
+    assert "super-secret-value" not in markdown
+    assert "<REDACTED_SECRET>" in markdown
 
 
 def test_write_markdown_report_creates_file(tmp_path: Path):

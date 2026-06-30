@@ -91,6 +91,17 @@ def test_ranking_sorts_secret_exposure_above_access_control():
     assert ranked[0].ranking_rationale.total_score > ranked[1].ranking_rationale.total_score
 
 
+def test_secret_exposure_severity_override_factor_is_explainable():
+    secret = _finding(draft_id="draft-secrets-1", vulnerability_class="secret-exposure", confidence="high")
+    ranked = rank_verified_findings([secret])[0]
+
+    assert ranked.severity == "critical"
+    severity_factor = ranked.ranking_rationale.factors[-1]
+    assert "secret-exposure" in severity_factor
+    assert "overrides numeric score" in severity_factor
+    assert "total score=" not in severity_factor
+
+
 def test_severity_counts_and_sorted_output():
     findings = rank_verified_findings(
         [

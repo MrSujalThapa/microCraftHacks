@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from cyber_swarm.models.attack_graph import GraphPathRef
+
 Confidence = Literal["high", "medium", "low"]
 Priority = Literal["high", "medium", "low"]
 Severity = Literal["critical", "high", "medium", "low", "info"]
@@ -70,6 +72,13 @@ class SafeReproduction:
 
 
 @dataclass(frozen=True)
+class QaComparison:
+    why_qa_may_miss: str
+    why_review_may_miss: str
+    suggested_regression_test: str
+
+
+@dataclass(frozen=True)
 class AgentFindingDraft:
     id: str
     title: str
@@ -85,6 +94,8 @@ class AgentFindingDraft:
     specialist: str
     selected_skills: list[str]
     retrieval_trace: list[str]
+    graph_path: GraphPathRef | None = None
+    qa_comparison: QaComparison | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +139,8 @@ class VerifiedFinding:
     source_draft_ids: list[str]
     demo_ready: bool = False
     demo_reason: str = ""
+    graph_path: GraphPathRef | None = None
+    qa_comparison: QaComparison | None = None
 
 
 @dataclass(frozen=True)

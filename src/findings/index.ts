@@ -7,14 +7,28 @@ import {
   loadFindingsReport,
   resolveFindingsReportPath,
 } from "./load";
+import { formatBestFindingOutput } from "../demo/commands";
+import { findBestDemoFinding } from "./demoQuality";
 import { formatFindingExplanation, formatFindingsTable, formatRejectedExplanation } from "./display";
 import { formatFixPlan } from "./fix";
 
-export function runFindingsCommand(options: { report?: string; demo?: boolean } = {}): void {
+export function runFindingsCommand(
+  options: { report?: string; demo?: boolean; best?: boolean } = {},
+): void {
   const root = resolve(process.cwd());
   const config = loadConfig(root);
   const reportPath = resolveFindingsReportPath(config.outputDir, options.report);
   const report = loadFindingsReport(reportPath);
+
+  if (options.best) {
+    const best = findBestDemoFinding(report.verifiedFindings);
+    if (!best) {
+      console.log("No demo-ready findings. Run `swarm demo <target>` or `swarm findings --demo`.");
+      return;
+    }
+    console.log(formatBestFindingOutput(best.id, { reportPath }));
+    return;
+  }
 
   console.log(formatFindingsTable(report, reportPath, { demoOnly: options.demo }));
 }

@@ -18,6 +18,9 @@ export interface AgentRunOptions {
   model?: string;
   mode?: string;
   fromCache?: boolean;
+  latency?: "fastest" | "balanced" | "thorough";
+  noLlm?: boolean;
+  forceLlm?: boolean;
   root?: string;
   pythonCommand?: string;
   runtimeRoot?: string;
@@ -34,9 +37,25 @@ export interface AgentRunResult {
     elapsedMs?: number;
     providerCalls?: Array<Record<string, unknown>>;
     mode?: string;
+    latencyMode?: string;
+    stageTimings?: Record<string, number>;
+    llmCache?: {
+      hit?: boolean;
+      inputTokenEstimate?: number;
+      outputTokens?: number;
+      modelLatencyMs?: number;
+    };
     cache?: {
       scanHash?: string;
       hit?: boolean;
+    };
+    demoLlm?: {
+      providerCallsAttempted?: number;
+      confirmationsAccepted?: number;
+      fallbackUsed?: boolean;
+      fallbackMessage?: string;
+      fallbackReason?: string;
+      error?: string;
     };
   };
 }
@@ -90,9 +109,23 @@ function readRuntimeMetrics(outputPath: string): AgentRunResult["runtimeMetrics"
           elapsedMs?: number;
           providerCalls?: Array<Record<string, unknown>>;
           mode?: string;
+          latencyMode?: string;
+          stageTimings?: Record<string, number>;
+          llmCache?: {
+            hit?: boolean;
+            inputTokenEstimate?: number;
+            outputTokens?: number;
+            modelLatencyMs?: number;
+          };
           cache?: {
             scanHash?: string;
             hit?: boolean;
+          };
+          demoLlm?: {
+            providerCallsAttempted?: number;
+            confirmationsAccepted?: number;
+            fallbackUsed?: boolean;
+            fallbackMessage?: string;
           };
         };
       };
@@ -147,6 +180,7 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
   const demoMode = mode === "demo" || mode === "fast";
   const maxSelectedContext = demoMode ? "4" : "8";
   const maxDraftFindings = demoMode ? "2" : "3";
+  const latency = options.latency ?? (demoMode ? "balanced" : "thorough");
 
   const result = spawnSync(
     pythonCommand,
@@ -171,7 +205,11 @@ export function runAgentRuntime(options: AgentRunOptions): AgentRunResult {
       "60",
       "--mode",
       mode,
+      "--latency",
+      latency,
       ...(fromCache ? ["--from-cache"] : []),
+      ...(options.noLlm ? ["--no-llm"] : []),
+      ...(options.forceLlm ? ["--force-llm"] : []),
     ],
     {
       cwd: paths.runtimeRoot,

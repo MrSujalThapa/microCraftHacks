@@ -15,6 +15,8 @@ class GraphState(TypedDict, total=False):
     scan_report_path: str
     routed_skills_path: str
     output_path: str
+    scan_hash: str
+    stable_content_fingerprint: str
     runtime_input: RuntimeInput
     scan_report: dict[str, Any]
     routed_skills: dict[str, Any]
@@ -35,6 +37,7 @@ class GraphState(TypedDict, total=False):
     recon_report: ReconReport
     attack_hypotheses: list[AttackHypothesis]
     evidence_packs: list[Any]
+    attack_graph: Any
     runtime_config: RuntimeConfig
     provider: Any
     provider_metrics: dict[str, Any]

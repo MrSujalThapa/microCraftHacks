@@ -21,6 +21,7 @@ from cyber_swarm.models.repo import (
 )
 from cyber_swarm.models.skills import RoutedSkills
 from cyber_swarm.verifier.verify import verify_draft, verify_drafts
+from cyber_swarm.testing.graph_fixtures import sample_graph_path
 
 
 def _scan_report() -> dict:
@@ -83,6 +84,7 @@ def _supported_draft() -> AgentFindingDraft:
         specialist="auth-breaker",
         selected_skills=["example-skill"],
         retrieval_trace=["c1"],
+        graph_path=sample_graph_path(),
     )
 
 

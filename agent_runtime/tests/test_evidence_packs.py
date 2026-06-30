@@ -21,6 +21,7 @@ from cyber_swarm.models.repo import (
     SurfacesResult,
 )
 from cyber_swarm.verifier.verify import verify_draft
+from cyber_swarm.testing.graph_fixtures import sample_graph_path
 
 
 def _repo(tmp_path: Path, files: dict[str, str]) -> RepoIntelligence:
@@ -210,6 +211,7 @@ def test_strict_finding_with_pack_refs_can_verify():
         specialist="auth-breaker",
         selected_skills=["example-skill"],
         retrieval_trace=["c1"],
+        graph_path=sample_graph_path(),
     )
     scan_report = {
         "inventory": {"files": [{"path": "src/auth.ts", "category": "typescript"}]},

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from cyber_swarm.evidence.prompt import format_packs_for_prompt
 from cyber_swarm.evidence.secret_packs import is_secret_evidence_pack
 from cyber_swarm.evidence.packs import build_evidence_packs
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.metrics.timing import merge_stage_timing
 from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.verifier.demo_quality import is_public_route
 
@@ -30,6 +32,7 @@ def _context_paths(state: GraphState) -> set[str]:
 
 
 def build_evidence_packs_node(state: GraphState) -> GraphState:
+    started = time.perf_counter()
     runtime_input = state.get("runtime_input")
     if runtime_input is None:
         raise RuntimeError("runtime_input is required before evidence pack build")
@@ -61,11 +64,17 @@ def build_evidence_packs_node(state: GraphState) -> GraphState:
         other_packs = [pack for pack in packs if pack not in secret_packs]
         packs = (secret_packs + other_packs)[:max_packs]
 
+    metrics = merge_stage_timing(
+        dict(state.get("metrics", {})),
+        "evidence_pack_build",
+        round((time.perf_counter() - started) * 1000, 2),
+    )
+
     return {
         **state,
         "evidence_packs": packs,
         "metrics": _merge_metrics(
-            state,
+            {**state, "metrics": metrics},
             "evidence_packs",
             {
                 "status": "completed",

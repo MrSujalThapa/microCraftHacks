@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+_LATENCY_CAPS = frozenset({"fastest", "balanced", "thorough"})
+
 
 @dataclass(frozen=True)
 class RuntimeConfig:
@@ -16,10 +18,24 @@ class RuntimeConfig:
     from_cache: bool = False
     max_model_calls: int | None = None
     max_specialists: int | None = None
+    latency: str = "balanced"
+    no_llm: bool = False
+    force_llm: bool = False
 
     @property
     def is_demo(self) -> bool:
         return self.mode in {"demo", "fast"}
+
+    @property
+    def effective_latency(self) -> str:
+        if self.is_demo:
+            return self.latency if self.latency in _LATENCY_CAPS else "balanced"
+        return self.latency if self.latency in _LATENCY_CAPS else "thorough"
+
+    def llm_provider_enabled(self) -> bool:
+        if self.no_llm:
+            return False
+        return self.provider in {"openai", "mock"}
 
     def effective_max_selected_context(self) -> int:
         if self.is_demo:

@@ -7,7 +7,9 @@ import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
 import { runAgentsRunCommand } from "./agents";
+import { runDemoCliCommand } from "./demo";
 import { runFindingsExplainCommand, runFindingsFixCommand, runFindingsListCommand } from "./findings";
+import { runSetupCommand } from "./setup";
 import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
@@ -29,6 +31,28 @@ program
   .command("init")
   .description("Create default .swarm/config.json and project folders")
   .action(runInit);
+
+program
+  .command("setup")
+  .description("Run first-run onboarding for config, provider, skills, and doctor checks")
+  .option("--provider <name>", "Model provider: openai, mock, or local")
+  .option("--model <name>", "Model name when using an LLM provider")
+  .option("--api-key <key>", "OpenAI API key to save locally")
+  .option("--skip-skills-sync", "Do not sync the external skills repo")
+  .option("--skip-skills-index", "Do not build the skills index")
+  .option("--editor", "Use editor-based OpenAI API key entry")
+  .option("--yes", "Accept defaults and run non-interactively")
+  .action(
+    (options: {
+      provider?: string;
+      model?: string;
+      apiKey?: string;
+      skipSkillsSync?: boolean;
+      skipSkillsIndex?: boolean;
+      editor?: boolean;
+      yes?: boolean;
+    }) => runSetupCommand(options),
+  );
 
 program.command("doctor").description("Check local environment and project layout").action(runDoctor);
 
@@ -94,6 +118,9 @@ agentsCommand
   .option("--mode <name>", "Runtime mode: full, demo, or fast")
   .option("--fast", "Alias for --mode demo")
   .option("--from-cache", "Reuse cached findings when scan report hash matches")
+  .option("--latency <mode>", "Latency profile: fastest, balanced, or thorough")
+  .option("--no-llm", "Skip LLM calls and use deterministic findings only")
+  .option("--force-llm", "Bypass model-result cache and call the LLM again")
   .action(
     (options: {
       report: string;
@@ -104,6 +131,9 @@ agentsCommand
       mode?: string;
       fast?: boolean;
       fromCache?: boolean;
+      latency?: "fastest" | "balanced" | "thorough";
+      noLlm?: boolean;
+      forceLlm?: boolean;
     }) => {
       runAgentsRunCommand({
         ...options,
@@ -114,11 +144,37 @@ agentsCommand
   );
 
 program
+  .command("demo [target]")
+  .description("Run scan → route playbooks → demo specialists → show demo-ready findings")
+  .option("--provider <name>", "Model provider: openai, mock, or local")
+  .option("--model <name>", "Model name when using an LLM provider")
+  .option("--from-cache", "Replay cached demo findings without model calls")
+  .option("--latency <mode>", "Latency profile: fastest, balanced, or thorough")
+  .option("--no-llm", "Skip LLM calls and use deterministic findings only")
+  .option("--force-llm", "Bypass model-result cache and call the LLM again")
+  .action(
+    (
+      target: string | undefined,
+      options: {
+        provider?: "openai" | "mock" | "local";
+        model?: string;
+        fromCache?: boolean;
+        latency?: "fastest" | "balanced" | "thorough";
+        noLlm?: boolean;
+        forceLlm?: boolean;
+      },
+    ) => {
+      runDemoCliCommand({ target, ...options });
+    },
+  );
+
+program
   .command("findings")
   .description("List verified findings from the latest findings report")
   .option("--report <path>", "Path to findings report JSON")
   .option("--demo", "Show only demo-ready verified findings")
-  .action((options: { report?: string; demo?: boolean }) => {
+  .option("--best", "Print the best demo-ready finding ID and follow-up commands")
+  .action((options: { report?: string; demo?: boolean; best?: boolean }) => {
     runFindingsListCommand(options);
   });
 
@@ -138,4 +194,7 @@ program
     runFindingsFixCommand(findingId, options);
   });
 
-program.parse(process.argv);
+program.parseAsync(process.argv).catch((error: unknown) => {
+  printCliError(error);
+  process.exitCode = 1;
+});

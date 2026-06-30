@@ -1,0 +1,44 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Local workspace artifacts
+.swarm/
+reports/
+
+# External skill repos (cloned locally via swarm skills sync)
+skills/
+
+# Dev docs and agent instructions
+docs/
+AGENTS.md
+agents.md
+
+# TypeScript sources and tests
+src/
+coverage/
+*.test.ts
+
+# Python dev artifacts (root .npmignore is ignored when package.json has
+# "files"; nested .npmignore under agent_runtime/cyber_swarm/ applies there)
+**/__pycache__/**
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/**
+**/*.egg-info/**
+agent_runtime/tests/
+
+# Repo metadata
+.git/
+.github/
+.gitignore
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Dependencies (dev-only in repo root)
+node_modules/

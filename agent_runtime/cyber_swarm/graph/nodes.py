@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,9 @@ from cyber_swarm.rag.output_redaction import redact_output_payload
 from cyber_swarm.schemas.output import build_output
 from cyber_swarm.schemas.report_md import write_markdown_report
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.metrics.timing import merge_stage_timing
 from cyber_swarm.rag.loop import serialize_context
+from cyber_swarm.schemas.llm_cache import normalized_scan_fingerprint
 from cyber_swarm.rag.normalize import normalize_runtime_input
 
 
@@ -27,62 +30,66 @@ def load_input(state: GraphState) -> GraphState:
 
     runtime_input = normalize_runtime_input(scan_report_path, routed_skills_path)
 
+    scan_report = {
+        "version": runtime_input.repo.version,
+        "scannedAt": runtime_input.repo.scanned_at,
+        "projectRoot": runtime_input.repo.project_root,
+        "inventory": {
+            "totalFiles": runtime_input.repo.inventory.total_files,
+            "byCategory": runtime_input.repo.inventory.by_category,
+            "files": [
+                {"path": item.path, "category": item.category}
+                for item in runtime_input.repo.inventory.files
+            ],
+        },
+        "stack": [
+            {
+                "name": item.name,
+                "confidence": item.confidence,
+                "evidence": item.evidence,
+            }
+            for item in runtime_input.repo.stack
+        ],
+        "surfaces": {
+            "routes": [
+                {
+                    "path": route.path,
+                    "file": route.file,
+                    **({"framework": route.framework} if route.framework else {}),
+                }
+                for route in runtime_input.repo.surfaces.routes
+            ],
+            "api": [
+                {
+                    "path": route.path,
+                    "file": route.file,
+                    **({"framework": route.framework} if route.framework else {}),
+                }
+                for route in runtime_input.repo.surfaces.api
+            ],
+            "auth": [
+                {
+                    "file": auth.file,
+                    **({"type": auth.type} if auth.type else {}),
+                }
+                for auth in runtime_input.repo.surfaces.auth
+            ],
+            "dataModels": [
+                {
+                    "file": model.file,
+                    **({"name": model.name} if model.name else {}),
+                }
+                for model in runtime_input.repo.surfaces.data_models
+            ],
+        },
+    }
+    stable_fingerprint = normalized_scan_fingerprint(scan_report)
+
     return {
         **state,
         "runtime_input": runtime_input,
-        "scan_report": {
-            "version": runtime_input.repo.version,
-            "scannedAt": runtime_input.repo.scanned_at,
-            "projectRoot": runtime_input.repo.project_root,
-            "inventory": {
-                "totalFiles": runtime_input.repo.inventory.total_files,
-                "byCategory": runtime_input.repo.inventory.by_category,
-                "files": [
-                    {"path": item.path, "category": item.category}
-                    for item in runtime_input.repo.inventory.files
-                ],
-            },
-            "stack": [
-                {
-                    "name": item.name,
-                    "confidence": item.confidence,
-                    "evidence": item.evidence,
-                }
-                for item in runtime_input.repo.stack
-            ],
-            "surfaces": {
-                "routes": [
-                    {
-                        "path": route.path,
-                        "file": route.file,
-                        **({"framework": route.framework} if route.framework else {}),
-                    }
-                    for route in runtime_input.repo.surfaces.routes
-                ],
-                "api": [
-                    {
-                        "path": route.path,
-                        "file": route.file,
-                        **({"framework": route.framework} if route.framework else {}),
-                    }
-                    for route in runtime_input.repo.surfaces.api
-                ],
-                "auth": [
-                    {
-                        "file": auth.file,
-                        **({"type": auth.type} if auth.type else {}),
-                    }
-                    for auth in runtime_input.repo.surfaces.auth
-                ],
-                "dataModels": [
-                    {
-                        "file": model.file,
-                        **({"name": model.name} if model.name else {}),
-                    }
-                    for model in runtime_input.repo.surfaces.data_models
-                ],
-            },
-        },
+        "scan_report": scan_report,
+        "stable_content_fingerprint": stable_fingerprint,
         "routed_skills": {
             "reportPath": runtime_input.routed_skills.report_path,
             "routedAt": runtime_input.routed_skills.routed_at,
@@ -107,6 +114,7 @@ def load_input(state: GraphState) -> GraphState:
                 "status": "completed",
                 "routedSkillCount": len(runtime_input.routed_skills.selected),
                 "normalized": True,
+                "stableContentFingerprint": stable_fingerprint,
             },
         ),
     }
@@ -185,6 +193,7 @@ def verifier_stub(state: GraphState) -> GraphState:
 
 
 def report_stub(state: GraphState) -> GraphState:
+    started = time.perf_counter()
     scan_report = state.get("scan_report", {})
     scan_report_path = Path(state["scan_report_path"])
     output_path = Path(state["output_path"])
@@ -246,6 +255,7 @@ def report_stub(state: GraphState) -> GraphState:
                 "rewrite_query",
                 "finalize_context",
                 "build_evidence_packs",
+                "build_attack_graph",
                 "recon_agent",
                 "attack_planner",
                 "specialist_agents",
@@ -297,15 +307,28 @@ def report_stub(state: GraphState) -> GraphState:
         pack.to_dict() if isinstance(pack, EvidencePack) else pack for pack in evidence_packs
     ]
 
+    attack_graph = state.get("attack_graph")
+    if attack_graph is not None:
+        from cyber_swarm.graph.attack_graph_nodes import attack_graph_to_dict
+
+        output["attackGraph"] = attack_graph_to_dict(attack_graph)
+
     output = redact_output_payload(output)
     write_json(output_path, output)
     markdown_path = write_markdown_report(str(output_path), output)
+
+    metrics = merge_stage_timing(
+        dict(state.get("metrics", {})),
+        "report_write",
+        round((time.perf_counter() - started) * 1000, 2),
+    )
 
     return {
         **state,
         "output": output,
         "metrics": {
             **output["metrics"],
+            **metrics,
             "report": {
                 "jsonPath": str(output_path),
                 "markdownPath": markdown_path,

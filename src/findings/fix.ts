@@ -24,9 +24,32 @@ const FIX_TEMPLATES: Record<string, FixTemplate> = {
     validation: [
       "Confirm affected files no longer contain credential-like literals.",
       "Verify runtime reads secrets from environment or secret manager.",
-      "Rotate any exposed credentials at the provider.",
       "Ensure .env is listed in .gitignore and never committed.",
       "Keep .env.example with placeholder values only.",
+    ],
+  },
+  bola: {
+    summary: "Enforce object ownership checks before data access using the authenticated user's identity.",
+    changes: [],
+    validation: [
+      "Create resource as user A; request with user B's token and a different owner_id; expect 403.",
+      "Assert queries filter by owner_id or tenant_id from the auth context, not from request params alone.",
+    ],
+  },
+  "privilege-escalation": {
+    summary: "Replace service-role/admin clients in request handlers with user-scoped clients protected by RLS.",
+    changes: [],
+    validation: [
+      "Confirm route handlers use anon/user-scoped Supabase clients only.",
+      "Integration test with anon key must not access other tenants' rows.",
+    ],
+  },
+  "ai-action-abuse": {
+    summary: "Gate AI/tool actions behind approval, role checks, or tenant boundaries before execution.",
+    changes: [],
+    validation: [
+      "Call action endpoint without approval flag; assert tool/LLM is not invoked.",
+      "Verify non-admin users cannot trigger side-effecting tool calls.",
     ],
   },
 };
@@ -98,6 +121,13 @@ export function formatFixPlan(
   lines.push("Concrete fix locations");
   for (const location of collectFixLocations(finding)) {
     lines.push(`  - ${location}`);
+  }
+  if (finding.graph_path?.missing_guard) {
+    lines.push("");
+    lines.push("Graph remediation");
+    lines.push(`  Trust boundary: ${finding.graph_path.trust_boundary_crossed}`);
+    lines.push(`  Add guard: ${finding.graph_path.missing_guard}`);
+    lines.push(`  Path: ${finding.graph_path.path_description}`);
   }
   lines.push("");
   lines.push("Recommended changes");
@@ -192,13 +222,13 @@ function buildSecretRemediationChanges(finding: VerifiedFinding): string[] {
       changes.push(`Rotate any exposed credentials referenced in ${file}.`);
     }
     changes.push(`Ensure ${file} is listed in .gitignore and never committed again.`);
-    changes.push(`Keep ${envExamplePath(file)} with placeholder values only (for example ${placeholderKey(keyNames)}=<REDACTED_SECRET>).`);
+    changes.push(`Keep ${envExamplePath(file)} with placeholder values only (for example ${placeholderKey(keyNames)}=<your-secret-here>).`);
     changes.push(`Load live values from runtime environment variables or a secret manager instead of ${file}.`);
   }
 
   if (changes.length === 0) {
     changes.push("Remove committed secret values from tracked configuration files and purge from git history.");
-    changes.push("Rotate any exposed credentials at the provider.");
+    changes.push("Rotate any exposed credential keys at the provider (never rotate placeholder redaction tokens).");
     changes.push("Ensure .env and other secret files are listed in .gitignore.");
     changes.push("Keep .env.example with placeholder values only.");
     changes.push("Load credentials from runtime environment variables or a secret manager.");
@@ -228,7 +258,7 @@ function collectSecretKeyNames(finding: VerifiedFinding): string[] {
     /\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE[_-]?KEY))\b/g;
 
   for (const item of finding.evidence) {
-    if (item.symbol && !item.symbol.startsWith("NEXT_PUBLIC_")) {
+    if (item.symbol && !item.symbol.startsWith("NEXT_PUBLIC_") && isRealSecretKeyName(item.symbol)) {
       keys.add(item.symbol);
     }
     for (const source of [item.explanation, item.snippet, finding.claim]) {
@@ -236,12 +266,25 @@ function collectSecretKeyNames(finding: VerifiedFinding): string[] {
         continue;
       }
       for (const match of source.matchAll(keyPattern)) {
-        keys.add(match[1]!);
+        const keyName = match[1]!;
+        if (isRealSecretKeyName(keyName)) {
+          keys.add(keyName);
+        }
       }
     }
   }
 
   return [...keys];
+}
+
+function isRealSecretKeyName(key: string): boolean {
+  if (key === "REDACTED_SECRET" || key.startsWith("REDACTED")) {
+    return false;
+  }
+  if (/^API_KEY$/i.test(key) && key === "API_KEY") {
+    return true;
+  }
+  return key.length > 0;
 }
 
 function isEnvLikePath(path: string): boolean {

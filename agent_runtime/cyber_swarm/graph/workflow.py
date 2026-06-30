@@ -8,6 +8,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from cyber_swarm.graph.attack_graph_nodes import build_attack_graph_node
 from cyber_swarm.graph.evidence_nodes import build_evidence_packs_node
 from cyber_swarm.graph.agent_nodes import (
     attack_planner_node,
@@ -43,6 +44,7 @@ def build_workflow():
     graph.add_node("rewrite_query", rewrite_query_node)
     graph.add_node("finalize_context", finalize_context_node)
     graph.add_node("build_evidence_packs", build_evidence_packs_node)
+    graph.add_node("build_attack_graph", build_attack_graph_node)
     graph.add_node("recon_agent", recon_agent_node)
     graph.add_node("attack_planner", attack_planner_node)
     graph.add_node("specialist_agents", specialist_agents_node)
@@ -65,7 +67,8 @@ def build_workflow():
     )
     graph.add_edge("rewrite_query", "retrieve_context")
     graph.add_edge("finalize_context", "build_evidence_packs")
-    graph.add_edge("build_evidence_packs", "recon_agent")
+    graph.add_edge("build_evidence_packs", "build_attack_graph")
+    graph.add_edge("build_attack_graph", "recon_agent")
     graph.add_edge("recon_agent", "attack_planner")
     graph.add_edge("attack_planner", "specialist_agents")
     graph.add_edge("specialist_agents", "verifier")
@@ -98,6 +101,8 @@ def run_workflow(
             "scan_report_path": str(scan_report_path),
             "routed_skills_path": str(routed_skills_path),
             "output_path": str(output_path),
+            "scan_hash": scan_hash or "",
+            "stable_content_fingerprint": "",
             "runtime_config": config,
             "provider": provider,
             "provider_metrics": {},
@@ -117,10 +122,13 @@ def run_workflow(
         raise RuntimeError("LangGraph workflow did not produce output")
 
     provider_metrics = final_state.get("provider_metrics", {})
+    demo_llm = provider_metrics.get("demo_findings", {})
     runtime_metrics: dict[str, Any] = {
         "provider": config.provider,
         "model": config.model,
         "mode": config.mode,
+        "latencyMode": config.effective_latency,
+        "noLlm": config.no_llm,
         "maxSelectedContext": config.effective_max_selected_context(),
         "maxDraftFindings": config.effective_max_draft_findings(),
         "maxModelCalls": config.effective_max_model_calls(),
@@ -128,11 +136,15 @@ def run_workflow(
         "callTimeoutSeconds": config.call_timeout_seconds,
         "providerCalls": provider.call_log(),
         "stages": provider_metrics,
+        "stageTimings": final_state.get("metrics", {}).get("stageTimings", {}),
+        "llmCache": final_state.get("metrics", {}).get("llmCache", {}),
         "cache": {
             "scanHash": scan_hash,
             "hit": False,
         },
     }
+    if isinstance(demo_llm, dict) and demo_llm:
+        runtime_metrics["demoLlm"] = demo_llm
     output_metrics = dict(output.get("metrics", {}))
     output_metrics["runtime"] = runtime_metrics
     output["metrics"] = output_metrics

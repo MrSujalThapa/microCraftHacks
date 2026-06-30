@@ -10,6 +10,7 @@ from cyber_swarm.models.agents import (
     AgentFindingDraft,
     EvidenceRef,
     NeedsMoreEvidenceFinding,
+    QaComparison,
     RankingRationale,
     VerifiedFinding,
     VerificationStatus,
@@ -17,9 +18,11 @@ from cyber_swarm.models.agents import (
 )
 from cyber_swarm.evidence.models import EvidencePack
 from cyber_swarm.evidence.packs import packs_by_id
+from cyber_swarm.models.attack_graph import AttackGraph
 from cyber_swarm.rag.redaction import contains_raw_secret, redact_secrets
 from cyber_swarm.rag.output_redaction import redact_evidence_ref
 from cyber_swarm.verifier.demo_quality import public_route_verification_failures
+from cyber_swarm.verifier.graph_strict import graph_backed_evidence_failures
 from cyber_swarm.verifier.strict import (
     affected_path_failures,
     concrete_anchor_failures,
@@ -245,6 +248,8 @@ def _draft_to_verified(
         selected_skills=list(draft.selected_skills),
         retrieval_trace=list(draft.retrieval_trace),
         source_draft_ids=[draft.id],
+        graph_path=draft.graph_path,
+        qa_comparison=draft.qa_comparison,
     )
 
 
@@ -288,6 +293,7 @@ def verify_draft(
     *,
     context_paths: set[str] | None = None,
     evidence_packs: list[EvidencePack] | None = None,
+    attack_graph: AttackGraph | None = None,
 ) -> VerificationResult:
     """Verify a single draft finding against scan evidence and safety rules."""
     draft = _redact_draft_evidence(draft)
@@ -313,6 +319,7 @@ def verify_draft(
     failed.extend(affected_path_failures(draft, inventory, routes))
     failed.extend(_evidence_pack_failures(draft, pack_index))
     failed.extend(public_route_verification_failures(draft))
+    failed.extend(graph_backed_evidence_failures(draft, attack_graph))
 
     surfaces, files = split_surfaces_and_files(draft, inventory, routes)
     if not files:
@@ -392,6 +399,7 @@ def verify_drafts(
     *,
     context_paths: set[str] | None = None,
     evidence_packs: list[EvidencePack] | None = None,
+    attack_graph: AttackGraph | None = None,
 ) -> tuple[list[VerifiedFinding], list[VerifierRejectedFinding], list[NeedsMoreEvidenceFinding]]:
     verified: list[VerifiedFinding] = []
     rejected: list[VerifierRejectedFinding] = []
@@ -403,6 +411,7 @@ def verify_drafts(
             scan_report,
             context_paths=context_paths,
             evidence_packs=evidence_packs,
+            attack_graph=attack_graph,
         )
         if result.status == "verified" and result.verified is not None:
             verified.append(result.verified)

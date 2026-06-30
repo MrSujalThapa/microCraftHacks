@@ -16,6 +16,9 @@ def test_build_parser_has_bridge_flags():
     assert "--output" in help_text
     assert "--mode" in help_text
     assert "--from-cache" in help_text
+    assert "--latency" in help_text
+    assert "--no-llm" in help_text
+    assert "--force-llm" in help_text
 
 
 def test_main_demo_mode_exits_zero(tmp_path: Path):
@@ -229,6 +232,7 @@ def test_run_workflow_executes_all_stages(tmp_path: Path):
         "rewrite_query",
         "finalize_context",
         "build_evidence_packs",
+        "build_attack_graph",
         "recon_agent",
         "attack_planner",
         "specialist_agents",

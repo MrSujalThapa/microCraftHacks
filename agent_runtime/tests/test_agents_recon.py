@@ -94,4 +94,12 @@ def test_attack_planner_produces_structured_hypotheses(tmp_path: Path):
     assert first.vulnerability_class
     assert first.target_files or first.target_surfaces
     assert first.required_evidence
-    assert first.specialist in {"auth-breaker", "api-abuse", "secrets-config"}
+    assert first.specialist in {
+        "auth-boundary",
+        "auth-breaker",
+        "object-ownership",
+        "api-abuse",
+        "secrets-config",
+        "storage-access",
+        "ai-action-boundary",
+    }
