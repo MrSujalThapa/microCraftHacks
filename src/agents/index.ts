@@ -18,6 +18,9 @@ export function runAgentsCommand(options: {
   model?: string;
   mode?: string;
   fromCache?: boolean;
+  latency?: "fastest" | "balanced" | "thorough";
+  noLlm?: boolean;
+  forceLlm?: boolean;
 }): void {
   const root = resolve(process.cwd());
   const paths = resolveAgentRuntimePaths(root, {
@@ -46,6 +49,9 @@ export function runAgentsCommand(options: {
     model: options.model,
     mode: options.mode ?? "full",
     fromCache: options.fromCache,
+    latency: options.latency,
+    noLlm: options.noLlm,
+    forceLlm: options.forceLlm,
   });
 
   const activation = readActivationSummary(result.outputPath, skillsRouted);

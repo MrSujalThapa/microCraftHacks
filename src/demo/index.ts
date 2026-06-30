@@ -27,6 +27,9 @@ export interface DemoRunOptions {
   provider?: "openai" | "mock" | "local";
   model?: string;
   fromCache?: boolean;
+  latency?: "fastest" | "balanced" | "thorough";
+  noLlm?: boolean;
+  forceLlm?: boolean;
 }
 
 export interface DemoRunResult {
@@ -53,9 +56,15 @@ function summarizeRuntimeMetrics(
     provider: result.provider,
     model: result.model,
     mode: result.runtimeMetrics?.mode,
+    latencyMode: result.runtimeMetrics?.latencyMode,
     elapsedMs: result.runtimeMetrics?.elapsedMs,
     cacheHit: result.runtimeMetrics?.cache?.hit,
     scanHash: result.runtimeMetrics?.cache?.scanHash,
+    llmCacheHit: result.runtimeMetrics?.llmCache?.hit,
+    inputTokenEstimate: result.runtimeMetrics?.llmCache?.inputTokenEstimate,
+    outputTokens: result.runtimeMetrics?.llmCache?.outputTokens,
+    modelLatencyMs: result.runtimeMetrics?.llmCache?.modelLatencyMs,
+    stageTimings: result.runtimeMetrics?.stageTimings,
     modelCalls: result.runtimeMetrics?.cache?.hit ? 0 : calls.length,
     tokens: totalTokens > 0 ? totalTokens : undefined,
   };
@@ -72,6 +81,7 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
 
   printSectionHeader(options.fromCache ? "1. Reuse scan (from cache)" : "1. Scan target");
   let scanReportPath: string;
+  let scanElapsedMs = 0;
   if (options.fromCache) {
     const cachedScan = findLatestScanReportForTarget(
       resolve(workspaceRoot, config.outputDir),
@@ -85,14 +95,19 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
     scanReportPath = cachedScan;
     printMetric("Scan report (reused)", scanReportPath);
   } else {
+    const scanStarted = Date.now();
     ({ reportPath: scanReportPath } = runScan(targetRoot, config, {
       outputRoot: workspaceRoot,
     }));
+    scanElapsedMs = Date.now() - scanStarted;
     printMetric("Scan report", scanReportPath);
+    printMetric("Scan elapsed", `${scanElapsedMs} ms`);
   }
 
   printSectionHeader("2. Route playbooks");
+  const routeStarted = Date.now();
   const routed = routeSkillsFromReport(workspaceRoot, config, scanReportPath);
+  const routeElapsedMs = Date.now() - routeStarted;
   printMetric("Playbooks routed", routed.output.selected.length);
   for (const skill of routed.output.selected.slice(0, 5)) {
     const reason = skill.reasons[0] ?? "matched repo signals";
@@ -102,6 +117,7 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
     console.log(`    … and ${routed.output.selected.length - 5} more`);
   }
   printMetric("Routed cache", routed.outputPath);
+  printMetric("Route elapsed", `${routeElapsedMs} ms`);
 
   const plannedAgents = planAgentsFromScanReport(readScanReport(scanReportPath));
 
@@ -122,6 +138,9 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
     model: options.model,
     mode: "demo",
     fromCache: options.fromCache,
+    latency: options.latency,
+    noLlm: options.noLlm,
+    forceLlm: options.forceLlm,
     runtimeRoot: resolveRuntimeRoot(workspaceRoot),
   });
 

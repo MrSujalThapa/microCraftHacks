@@ -71,6 +71,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Reuse cached findings when scan report hash matches",
     )
+    parser.add_argument(
+        "--latency",
+        default="balanced",
+        choices=["fastest", "balanced", "thorough"],
+        help="Demo latency profile: fastest, balanced, or thorough",
+    )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Skip LLM calls and use deterministic findings only",
+    )
+    parser.add_argument(
+        "--force-llm",
+        action="store_true",
+        help="Bypass the model-result cache and call the LLM again",
+    )
     return parser
 
 
@@ -101,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
         call_timeout_seconds=args.call_timeout,
         mode=args.mode,
         from_cache=args.from_cache,
+        latency=args.latency,
+        no_llm=args.no_llm,
+        force_llm=args.force_llm,
     )
     try:
         run_bridge(args.scan_report, args.routed_skills, args.output, runtime_config=runtime_config)

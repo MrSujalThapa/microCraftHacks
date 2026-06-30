@@ -249,6 +249,7 @@ def _draft_to_verified(
         retrieval_trace=list(draft.retrieval_trace),
         source_draft_ids=[draft.id],
         graph_path=draft.graph_path,
+        qa_comparison=draft.qa_comparison,
     )
 
 

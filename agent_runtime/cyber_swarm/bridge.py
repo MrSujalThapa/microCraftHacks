@@ -51,12 +51,22 @@ def _print_summary(output: dict) -> None:
             f"provider={runtime.get('provider', 'unknown')} "
             f"model={runtime.get('model', 'unknown')} "
             f"mode={runtime.get('mode', 'full')} "
+            f"latency={runtime.get('latencyMode', 'n/a')} "
             f"elapsedMs={runtime.get('elapsedMs', 'n/a')}"
         )
         cache = runtime.get("cache", {})
         if isinstance(cache, dict) and cache.get("scanHash"):
             hit = cache.get("hit")
             print(f"  Cache: {'hit' if hit else 'miss'}  scanHash={cache.get('scanHash')}")
+        llm_cache = runtime.get("llmCache", {})
+        if isinstance(llm_cache, dict) and llm_cache:
+            print(f"  LLM cache: {'hit' if llm_cache.get('hit') else 'miss'}")
+            if llm_cache.get("inputTokenEstimate") is not None:
+                print(f"  Input token estimate: {llm_cache.get('inputTokenEstimate')}")
+            if llm_cache.get("outputTokens") is not None:
+                print(f"  Output tokens: {llm_cache.get('outputTokens')}")
+            if llm_cache.get("modelLatencyMs") is not None:
+                print(f"  Model latency: {llm_cache.get('modelLatencyMs')} ms")
         calls = runtime.get("providerCalls", [])
         if isinstance(cache, dict) and cache.get("hit"):
             print("  Model calls: 0")
@@ -67,6 +77,21 @@ def _print_summary(output: dict) -> None:
                 if isinstance(item, dict)
             )
             print(f"  Model calls: {len(calls)}  Tokens: {total_tokens or 'n/a'}")
+        stage_timings = runtime.get("stageTimings", {})
+        if isinstance(stage_timings, dict) and stage_timings:
+            print("  Stage timings (ms):")
+            for stage in (
+                "evidence_pack_build",
+                "attack_graph_build",
+                "deterministic_draft_generation",
+                "llm_prompt_build",
+                "llm_call",
+                "verification",
+                "ranking",
+                "report_write",
+            ):
+                if stage in stage_timings:
+                    print(f"    {stage}: {stage_timings[stage]}")
     if verifier:
         print(
             "  Verifier: "

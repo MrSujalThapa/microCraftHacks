@@ -95,6 +95,9 @@ agentsCommand
   .option("--mode <name>", "Runtime mode: full, demo, or fast")
   .option("--fast", "Alias for --mode demo")
   .option("--from-cache", "Reuse cached findings when scan report hash matches")
+  .option("--latency <mode>", "Latency profile: fastest, balanced, or thorough")
+  .option("--no-llm", "Skip LLM calls and use deterministic findings only")
+  .option("--force-llm", "Bypass model-result cache and call the LLM again")
   .action(
     (options: {
       report: string;
@@ -105,6 +108,9 @@ agentsCommand
       mode?: string;
       fast?: boolean;
       fromCache?: boolean;
+      latency?: "fastest" | "balanced" | "thorough";
+      noLlm?: boolean;
+      forceLlm?: boolean;
     }) => {
       runAgentsRunCommand({
         ...options,
@@ -120,6 +126,9 @@ program
   .option("--provider <name>", "Model provider: openai, mock, or local")
   .option("--model <name>", "Model name when using an LLM provider")
   .option("--from-cache", "Replay cached demo findings without model calls")
+  .option("--latency <mode>", "Latency profile: fastest, balanced, or thorough")
+  .option("--no-llm", "Skip LLM calls and use deterministic findings only")
+  .option("--force-llm", "Bypass model-result cache and call the LLM again")
   .action(
     (
       target: string | undefined,
@@ -127,6 +136,9 @@ program
         provider?: "openai" | "mock" | "local";
         model?: string;
         fromCache?: boolean;
+        latency?: "fastest" | "balanced" | "thorough";
+        noLlm?: boolean;
+        forceLlm?: boolean;
       },
     ) => {
       runDemoCliCommand({ target, ...options });

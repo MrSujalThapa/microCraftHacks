@@ -31,6 +31,24 @@ def test_mock_provider_records_calls_without_network():
     assert provider.call_log()[0]["mock"] is True
 
 
+def test_mock_provider_returns_demo_findings_payload():
+    provider = MockProvider()
+    user = json.dumps(
+        {
+            "evidencePacks": [
+                {
+                    "id": "pack-1",
+                    "surfaceType": "config",
+                    "path": "backend/.env",
+                    "symbol": "API_KEY",
+                }
+            ]
+        }
+    )
+    result = provider.complete_json(system="sys", user=user, purpose="demo_findings")
+    assert result.payload["findings"][0]["evidence_pack_ids"] == ["pack-1"]
+
+
 def test_openai_provider_repairs_invalid_json(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 

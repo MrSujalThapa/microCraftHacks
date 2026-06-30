@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from cyber_swarm.rag.output_redaction import redact_output_payload
 from cyber_swarm.schemas.output import build_output
 from cyber_swarm.schemas.report_md import write_markdown_report
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.metrics.timing import merge_stage_timing
 from cyber_swarm.rag.loop import serialize_context
 from cyber_swarm.rag.normalize import normalize_runtime_input
 
@@ -185,6 +187,7 @@ def verifier_stub(state: GraphState) -> GraphState:
 
 
 def report_stub(state: GraphState) -> GraphState:
+    started = time.perf_counter()
     scan_report = state.get("scan_report", {})
     scan_report_path = Path(state["scan_report_path"])
     output_path = Path(state["output_path"])
@@ -308,11 +311,18 @@ def report_stub(state: GraphState) -> GraphState:
     write_json(output_path, output)
     markdown_path = write_markdown_report(str(output_path), output)
 
+    metrics = merge_stage_timing(
+        dict(state.get("metrics", {})),
+        "report_write",
+        round((time.perf_counter() - started) * 1000, 2),
+    )
+
     return {
         **state,
         "output": output,
         "metrics": {
             **output["metrics"],
+            **metrics,
             "report": {
                 "jsonPath": str(output_path),
                 "markdownPath": markdown_path,

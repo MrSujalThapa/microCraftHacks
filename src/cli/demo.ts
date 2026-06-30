@@ -6,6 +6,9 @@ export function runDemoCliCommand(options: {
   provider?: "openai" | "mock" | "local";
   model?: string;
   fromCache?: boolean;
+  latency?: "fastest" | "balanced" | "thorough";
+  noLlm?: boolean;
+  forceLlm?: boolean;
 }): void {
   try {
     runDemoCommand(options);

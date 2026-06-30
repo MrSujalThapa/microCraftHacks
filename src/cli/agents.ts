@@ -9,6 +9,9 @@ export function runAgentsRunCommand(options: {
   model?: string;
   mode?: string;
   fromCache?: boolean;
+  latency?: "fastest" | "balanced" | "thorough";
+  noLlm?: boolean;
+  forceLlm?: boolean;
 }): void {
   try {
     runAgentsCommand(options);

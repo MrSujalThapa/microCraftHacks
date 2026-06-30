@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 from typing import Any
 
 from cyber_swarm.agents.attack_planner import run_attack_planner
+from cyber_swarm.agents.demo_llm import run_demo_findings_with_provider
 from cyber_swarm.agents.model_stages import (
     run_attack_planner_with_provider,
     run_recon_with_provider,
@@ -14,6 +16,7 @@ from cyber_swarm.agents.recon import run_recon
 from cyber_swarm.agents.specialists.runner import run_specialists
 from cyber_swarm.evidence.draft_helpers import build_deterministic_secret_drafts
 from cyber_swarm.graph.state import GraphState
+from cyber_swarm.metrics.timing import merge_stage_timing
 from cyber_swarm.models.agents import AgentFindingDraft
 from cyber_swarm.models.runtime_config import RuntimeConfig
 
@@ -166,9 +169,12 @@ def attack_planner_node(state: GraphState) -> GraphState:
     selected_context = state.get("selected_context", [])
     max_hypotheses = runtime_config.effective_max_draft_findings()
 
-    allow_model = runtime_config.provider == "openai" and provider is not None
-    if runtime_config.is_demo:
-        allow_model = allow_model and runtime_config.effective_max_model_calls() >= 1
+    # Demo mode uses deterministic planning; the single LLM call happens in specialist_agents.
+    allow_model = (
+        runtime_config.provider == "openai"
+        and provider is not None
+        and not runtime_config.is_demo
+    )
 
     if allow_model:
         hypotheses, stage_metrics = run_attack_planner_with_provider(
@@ -202,6 +208,7 @@ def attack_planner_node(state: GraphState) -> GraphState:
 
 
 def specialist_agents_node(state: GraphState) -> GraphState:
+    started = time.perf_counter()
     runtime_input = _get_runtime_input(state)
     hypotheses = state.get("attack_hypotheses", [])
     runtime_config = _runtime_config(state)
@@ -209,6 +216,8 @@ def specialist_agents_node(state: GraphState) -> GraphState:
 
     evidence_packs = state.get("evidence_packs", [])
     selected_context = state.get("selected_context", [])
+    provider = state.get("provider")
+    provider_metrics = _provider_metrics(state)
 
     deterministic_secrets = build_deterministic_secret_drafts(
         runtime_input,
@@ -237,25 +246,76 @@ def specialist_agents_node(state: GraphState) -> GraphState:
     )
     drafts = _merge_secret_drafts(deterministic_secrets, drafts)
     drafts = _prioritize_drafts_for_demo(drafts, runtime_config)
+
+    deterministic_draft_ms = round((time.perf_counter() - started) * 1000, 2)
+    metrics = dict(state.get("metrics", {}))
+    metrics = merge_stage_timing(metrics, "deterministic_draft_generation", deterministic_draft_ms)
+
+    llm_drafts: list[AgentFindingDraft] = []
+    llm_stage: dict[str, Any] | None = None
+    allow_demo_llm = (
+        runtime_config.is_demo
+        and runtime_config.llm_provider_enabled()
+        and provider is not None
+        and runtime_config.effective_max_model_calls() >= 1
+    )
+
+    if allow_demo_llm:
+        llm_started = time.perf_counter()
+        try:
+            llm_drafts, llm_stage = run_demo_findings_with_provider(
+                provider,
+                runtime_input,
+                evidence_packs=evidence_packs,
+                attack_graph=state.get("attack_graph"),
+                routed_skills=state.get("routed_skills", {}),
+                deterministic_candidates=drafts,
+                runtime_config=runtime_config,
+                scan_hash=state.get("scan_hash"),
+                output_path=state.get("output_path"),
+            )
+            provider_metrics["demo_findings"] = llm_stage
+        except Exception as error:  # noqa: BLE001
+            llm_stage = {"mode": "fallback", "error": str(error)}
+            provider_metrics["demo_findings"] = llm_stage
+        metrics = merge_stage_timing(
+            metrics,
+            "llm_call",
+            round((time.perf_counter() - llm_started) * 1000, 2),
+        )
+        if llm_stage and isinstance(llm_stage.get("llmCache"), dict):
+            llm_cache = llm_stage["llmCache"]
+            metrics["llmCache"] = llm_cache
+            metrics = merge_stage_timing(
+                metrics,
+                "llm_prompt_build",
+                float(llm_cache.get("promptBuildMs") or 0),
+            )
+
+    if llm_drafts:
+        drafts = llm_drafts
     drafts = drafts[: runtime_config.effective_max_draft_findings()]
 
     return {
         **state,
         "draft_findings": drafts,
         "rejected_findings": rejected,
+        "provider_metrics": provider_metrics,
         "metrics": _merge_metrics(
-            state,
+            {**state, "metrics": metrics},
             "specialist_agents",
             {
                 "status": "completed",
                 "draftFindingCount": len(drafts),
                 "rejectedDraftCount": len(rejected),
                 "deterministicSecretDraftCount": len(deterministic_secrets),
+                "llmDraftCount": len(llm_drafts),
                 "specialists": sorted({draft.specialist for draft in drafts}),
                 "agentsRun": len(invoked_specialists),
                 "invokedSpecialists": invoked_specialists,
                 "maxDraftFindings": runtime_config.effective_max_draft_findings(),
                 "maxSpecialists": max_specialists,
+                "demoLlm": llm_stage,
             },
         ),
     }

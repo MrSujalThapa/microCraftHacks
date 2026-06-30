@@ -95,6 +95,7 @@ class AgentFindingDraft:
     selected_skills: list[str]
     retrieval_trace: list[str]
     graph_path: GraphPathRef | None = None
+    qa_comparison: QaComparison | None = None
 
 
 @dataclass(frozen=True)
