@@ -20,12 +20,14 @@ src/
 coverage/
 *.test.ts
 
-# Python dev artifacts
+# Python dev artifacts (root .npmignore is ignored when package.json has
+# "files"; nested .npmignore under agent_runtime/cyber_swarm/ applies there)
+**/__pycache__/**
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/**
+**/*.egg-info/**
 agent_runtime/tests/
-agent_runtime/.pytest_cache/
-agent_runtime/**/__pycache__/**
-agent_runtime/**/*.pyc
-agent_runtime/**/*.egg-info/
 
 # Repo metadata
 .git/

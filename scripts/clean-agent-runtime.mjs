@@ -1,21 +1,42 @@
-import { readdirSync, rmSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-function cleanRuntimeArtifacts(dir) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = join(dir, entry.name);
+const ARTIFACT_DIR_NAMES = new Set(["__pycache__", ".pytest_cache"]);
+
+function isArtifactDirectory(name) {
+  return ARTIFACT_DIR_NAMES.has(name) || name.endsWith(".egg-info");
+}
+
+function isArtifactFile(name) {
+  return name.endsWith(".pyc") || name.endsWith(".pyo");
+}
+
+export function cleanPythonArtifacts(rootDir) {
+  if (!statSync(rootDir, { throwIfNoEntry: false })?.isDirectory()) {
+    return;
+  }
+
+  for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+    const fullPath = join(rootDir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === "__pycache__" || entry.name.endsWith(".egg-info")) {
+      if (isArtifactDirectory(entry.name)) {
         rmSync(fullPath, { recursive: true, force: true });
         continue;
       }
-      cleanRuntimeArtifacts(fullPath);
+      cleanPythonArtifacts(fullPath);
       continue;
     }
-    if (entry.name.endsWith(".pyc")) {
+    if (isArtifactFile(entry.name)) {
       rmSync(fullPath, { force: true });
     }
   }
 }
 
-cleanRuntimeArtifacts(join(process.cwd(), "agent_runtime"));
+const invokedDirectly =
+  process.argv[1] &&
+  import.meta.url.replace(/\/?$/u, "") === pathToFileURL(process.argv[1]).href.replace(/\/?$/u, "");
+
+if (invokedDirectly) {
+  cleanPythonArtifacts(join(process.cwd(), "agent_runtime"));
+}

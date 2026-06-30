@@ -20,6 +20,8 @@ dist/
 build/
 out/
 coverage/
+pack.json
+*.tgz
 
 # Caches
 

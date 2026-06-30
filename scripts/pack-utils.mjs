@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+
+import { cleanPythonArtifacts } from "./clean-agent-runtime.mjs";
 
 const FORBIDDEN_PATTERNS = [
   { label: ".env secrets file", pattern: /(?:^|\/)\\.env$/u },
@@ -11,6 +14,7 @@ const FORBIDDEN_PATTERNS = [
   { label: "Python tests", pattern: /^agent_runtime\/tests\//u },
   { label: "pytest cache", pattern: /\.pytest_cache\//u },
   { label: "Python bytecode cache", pattern: /__pycache__\//u },
+  { label: "Python bytecode files", pattern: /\.(?:pyc|pyo)$/u },
   { label: "Python egg-info", pattern: /\.egg-info\//u },
 ];
 
@@ -24,11 +28,7 @@ export const REQUIRED_PACK_PATHS = [
 ];
 
 export function runPackDryRun(cwd = process.cwd()) {
-  spawnSync(process.execPath, ["scripts/clean-agent-runtime.mjs"], {
-    cwd,
-    encoding: "utf8",
-    shell: process.platform === "win32",
-  });
+  cleanPythonArtifacts(join(cwd, "agent_runtime"));
 
   const result = spawnSync("npm", ["pack", "--dry-run"], {
     cwd,
