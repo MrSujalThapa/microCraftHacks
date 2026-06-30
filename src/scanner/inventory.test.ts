@@ -26,6 +26,7 @@ afterEach(() => {
 describe("categorizeFile", () => {
   it("maps common extensions and config filenames", () => {
     expect(categorizeFile("src/index.ts")).toBe("typescript");
+    expect(categorizeFile("src/scanner/surfaces.test.ts")).toBe("test");
     expect(categorizeFile("src/App.tsx")).toBe("typescript");
     expect(categorizeFile("lib/util.js")).toBe("javascript");
     expect(categorizeFile("app/main.py")).toBe("python");
@@ -76,6 +77,15 @@ describe("walkRepo", () => {
       mkdirSync(join(root, dir, "nested"), { recursive: true });
       writeFileSync(join(root, dir, "nested", "file.ts"), "x", "utf8");
     }
+
+    mkdirSync(join(root, "backend", ".venv", "Lib", "site-packages", "pkg"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(root, "backend", ".venv", "Lib", "site-packages", "pkg", "index.py"),
+      "x",
+      "utf8",
+    );
 
     const inventory = walkRepo(root);
     expect(inventory.totalFiles).toBe(0);

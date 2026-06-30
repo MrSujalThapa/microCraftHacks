@@ -13,13 +13,13 @@
   "appUrl": null,
   "skills": {
     "externalRepo": "https://github.com/mukul975/Anthropic-Cybersecurity-Skills.git",
-    "externalRoot": "skills/external",
+    "externalRoot": "skills/external/Anthropic-Cybersecurity-Skills/skills",
     "localApprovedRoot": "skills/local-approved",
     "draftRoot": "skills/drafts",
     "rejectedRoot": "skills/rejected",
     "lockfile": ".swarm/skills.lock.json",
     "autoReindex": true
   },
-  "cacheDir": ".swarm/cache",
+  "cacheDir": ".swarm/cache", 
   "outputDir": ".swarm/reports"
 }

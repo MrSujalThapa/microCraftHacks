@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { walkRepo } from "./inventory";
+import { categorizeFile, walkRepo } from "./inventory";
 import { mapSurfaces } from "./surfaces";
 
 const tempRoots: string[] = [];
@@ -75,7 +75,7 @@ describe("mapSurfaces", () => {
     expect(surfaces.api.map((r) => r.path)).toContain("/api/health");
   });
 
-  it("maps Express and FastAPI routes from source", () => {
+  it("maps Express and FastAPI routes from production source files", () => {
     const root = makeTempRoot();
 
     mkdirSync(join(root, "src"), { recursive: true });
@@ -98,6 +98,28 @@ describe("mapSurfaces", () => {
     expect(surfaces.api.map((r) => r.path)).toEqual(
       expect.arrayContaining(["/api/login", "/api/orders", "/items"]),
     );
+  });
+
+  it("skips Express routes embedded in test files by default", () => {
+    const root = makeTempRoot();
+
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(
+      join(root, "src", "server.test.ts"),
+      "app.get('/health', () => {});\napp.post('/api/login', () => {});\n",
+      "utf8",
+    );
+
+    expect(categorizeFile("src/server.test.ts")).toBe("test");
+
+    const inventory = walkRepo(root);
+    const surfaces = mapSurfaces(root, inventory);
+
+    expect(surfaces.routes).toHaveLength(0);
+    expect(surfaces.api).toHaveLength(0);
+
+    const withTests = mapSurfaces(root, inventory, { includeTests: true });
+    expect(withTests.api.map((route) => route.path)).toContain("/api/login");
   });
 
   it("maps Prisma models and auth-related files", () => {
@@ -141,5 +163,21 @@ describe("mapSurfaces on project root", () => {
       auth: expect.any(Array),
       dataModels: expect.any(Array),
     });
+  });
+
+  it("does not emit fake API routes from scanner test fixtures", () => {
+    const projectRoot = join(__dirname, "..", "..");
+    if (!existsSync(join(projectRoot, "package.json"))) {
+      return;
+    }
+
+    const inventory = walkRepo(projectRoot);
+    const surfaces = mapSurfaces(projectRoot, inventory);
+
+    expect(surfaces.api.map((route) => route.path)).not.toContain("/api/login");
+    expect(surfaces.api.map((route) => route.path)).not.toContain("/api/orders");
+    expect(surfaces.routes.map((route) => route.path)).not.toContain("/health");
+    expect(surfaces.api.every((route) => !route.file.endsWith(".test.ts"))).toBe(true);
+    expect(surfaces.routes.every((route) => !route.file.endsWith(".test.ts"))).toBe(true);
   });
 });

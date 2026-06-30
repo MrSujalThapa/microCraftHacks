@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { resolveProvider } from "./provider";
 import { ConfigError } from "./errors";
 import { loadConfig } from "./load";
 import { getConfigPath, getManagedDirectories } from "./paths";
@@ -18,6 +19,7 @@ export function getDoctorConfigStatus(root = process.cwd()): DoctorConfigStatus 
       message: "missing — run `swarm init`",
       execution: null,
       folders: [],
+      provider: resolveProvider(root),
     };
   }
 
@@ -35,6 +37,7 @@ export function getDoctorConfigStatus(root = process.cwd()): DoctorConfigStatus 
       message: "ok",
       execution: `${config.riskLevel} / ${config.provider} (${config.model})`,
       folders,
+      provider: resolveProvider(root),
     };
   } catch (error) {
     const message =
@@ -51,6 +54,7 @@ export function getDoctorConfigStatus(root = process.cwd()): DoctorConfigStatus 
       message,
       execution: null,
       folders: [],
+      provider: resolveProvider(root),
     };
   }
 }

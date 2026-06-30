@@ -7,6 +7,7 @@ import { printCliError } from "./errors";
 import { runInit } from "./init";
 import { runScanCommand } from "./scan";
 import { runAgentsRunCommand } from "./agents";
+import { runFindingsExplainCommand, runFindingsFixCommand, runFindingsListCommand } from "./findings";
 import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
@@ -88,8 +89,53 @@ agentsCommand
   .requiredOption("--report <path>", "Path to scan report JSON")
   .option("--routed-skills <path>", "Path to routed skills JSON")
   .option("--output <path>", "Path to write findings output JSON")
-  .action((options: { report: string; routedSkills?: string; output?: string }) => {
-    runAgentsRunCommand(options);
+  .option("--provider <name>", "Model provider: openai, mock, or local")
+  .option("--model <name>", "Model name when using an LLM provider")
+  .option("--mode <name>", "Runtime mode: full, demo, or fast")
+  .option("--fast", "Alias for --mode demo")
+  .option("--from-cache", "Reuse cached findings when scan report hash matches")
+  .action(
+    (options: {
+      report: string;
+      routedSkills?: string;
+      output?: string;
+      provider?: "openai" | "mock" | "local";
+      model?: string;
+      mode?: string;
+      fast?: boolean;
+      fromCache?: boolean;
+    }) => {
+      runAgentsRunCommand({
+        ...options,
+        mode: options.fast ? "demo" : options.mode,
+        fromCache: options.fromCache,
+      });
+    },
+  );
+
+program
+  .command("findings")
+  .description("List verified findings from the latest findings report")
+  .option("--report <path>", "Path to findings report JSON")
+  .option("--demo", "Show only demo-ready verified findings")
+  .action((options: { report?: string; demo?: boolean }) => {
+    runFindingsListCommand(options);
+  });
+
+program
+  .command("explain <finding-id>")
+  .description("Explain a verified finding in detail")
+  .option("--report <path>", "Path to findings report JSON")
+  .action((findingId: string, options: { report?: string }) => {
+    runFindingsExplainCommand(findingId, options);
+  });
+
+program
+  .command("fix <finding-id>")
+  .description("Generate a concrete patch plan for a verified finding")
+  .option("--report <path>", "Path to findings report JSON")
+  .action((findingId: string, options: { report?: string }) => {
+    runFindingsFixCommand(findingId, options);
   });
 
 program.parse(process.argv);
