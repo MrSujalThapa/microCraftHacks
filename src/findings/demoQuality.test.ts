@@ -342,6 +342,7 @@ describe("wattif report shapes", () => {
     };
 
     const output = formatFindingsTable(report, "wattif-findings.json", { demoOnly: true });
+    expect(output).toContain("Demo-ready: 1");
     expect(output).toContain("verified-draft-h1");
     expect(output).not.toContain("verified-draft-auth-health");
     expect(output).not.toContain("verified-draft-validation-health");
@@ -413,5 +414,73 @@ describe("formatFindingsTable demoOnly", () => {
     expect(output).not.toContain("verified-health-validation");
     expect(output).not.toContain("lacks visible auth");
     expect(output).not.toContain("lacks visible validation");
+  });
+
+  it("aligns demo-ready header count with displayed rows after secret-priority filtering", () => {
+    const base = sampleFindingsReport().verifiedFindings[0]!;
+    const secretFinding: VerifiedFinding = {
+      ...base,
+      id: "verified-secret",
+      title: "Committed secret in backend/.env",
+      vulnerability_class: "secret-exposure",
+      claim: "backend/.env contains SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>.",
+      affected_surfaces: ["backend/.env"],
+      affected_files: ["backend/.env"],
+      evidence: [
+        {
+          type: "file",
+          explanation: "backend/.env contains SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>.",
+          path: "backend/.env",
+          line_start: 1,
+          snippet: "SUPABASE_SERVICE_ROLE_KEY=<REDACTED_SECRET>",
+          evidence_pack_id: "ep-secret",
+        },
+      ],
+      demo_ready: true,
+    };
+    const otherDemoReady: VerifiedFinding = {
+      ...base,
+      id: "verified-auth-gap",
+      title: "Missing auth guard on /api/admin handler",
+      vulnerability_class: "broken-access-control",
+      claim: "The /api/admin handler lacks requireAuth() enforcement before request processing.",
+      affected_surfaces: ["/api/admin"],
+      affected_files: ["src/admin.ts"],
+      evidence: [
+        {
+          type: "file",
+          explanation: "requireAuth() is not invoked on the /api/admin handler.",
+          path: "src/admin.ts",
+          route: "/api/admin",
+          line_start: 5,
+          snippet: "app.post('/api/admin', handler)",
+          evidence_pack_id: "ep-admin",
+        },
+      ],
+      confidence: "high",
+      demo_ready: true,
+    };
+
+    expect(isDemoReady(secretFinding)).toBe(true);
+    expect(isDemoReady(otherDemoReady)).toBe(true);
+    expect(filterDemoFindings([secretFinding, otherDemoReady])).toHaveLength(1);
+
+    const report = {
+      ...sampleFindingsReport(),
+      verifiedFindings: [secretFinding, otherDemoReady],
+      metrics: {
+        summary: {
+          verifiedCount: 2,
+          rejectedCount: 0,
+          demoReadyCount: 2,
+        },
+      },
+    };
+
+    const output = formatFindingsTable(report, "report.json", { demoOnly: true });
+    expect(output).toContain("Demo-ready: 1");
+    expect(output).toContain("verified-secret");
+    expect(output).not.toContain("verified-auth-gap");
+    expect(output).toContain("Showing top demo-ready finding; 1 lower-priority finding hidden.");
   });
 });

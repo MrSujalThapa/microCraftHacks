@@ -29,7 +29,12 @@ export function formatFindingsTable(
   const summary = report.metrics.summary;
   const verifiedCount = summary?.verifiedCount ?? report.verifiedFindings.length;
   const rejectedCount = summary?.rejectedCount ?? report.rejectedFindings.length;
-  const demoReadyCount = report.verifiedFindings.filter(isDemoReady).length;
+  const rawDemoReadyCount = report.verifiedFindings.filter(isDemoReady).length;
+
+  const displayedFindings = options.demoOnly
+    ? filterDemoFindings(report.verifiedFindings)
+    : sortVerifiedFindings(report.verifiedFindings);
+  const demoReadyCount = options.demoOnly ? displayedFindings.length : rawDemoReadyCount;
 
   lines.push(`Findings report: ${reportPath}`);
   lines.push(
@@ -42,14 +47,22 @@ export function formatFindingsTable(
     return lines.join("\n");
   }
 
-  const findings = options.demoOnly
-    ? filterDemoFindings(report.verifiedFindings)
-    : sortVerifiedFindings(report.verifiedFindings);
-
-  if (findings.length === 0) {
+  if (displayedFindings.length === 0) {
     lines.push("No demo-ready verified findings.");
     return lines.join("\n");
   }
+
+  if (options.demoOnly && rawDemoReadyCount > displayedFindings.length) {
+    const hiddenCount = rawDemoReadyCount - displayedFindings.length;
+    const displayedLabel = displayedFindings.length === 1 ? "finding" : "findings";
+    const hiddenLabel = hiddenCount === 1 ? "finding" : "findings";
+    lines.push(
+      `Showing top demo-ready ${displayedLabel}; ${hiddenCount} lower-priority ${hiddenLabel} hidden.`,
+    );
+    lines.push("");
+  }
+
+  const findings = displayedFindings;
 
   const rows = findings.map((finding) => ({
     severity: finding.severity,
