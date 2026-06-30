@@ -12,7 +12,7 @@ from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.rag.redaction import redact_secrets
 from cyber_swarm.verifier.demo_quality import is_public_route
 
-DEMO_PROMPT_VERSION = "demo-findings-v1"
+DEMO_PROMPT_VERSION = "demo-confirm-v2"
 
 _LATENCY_CAPS: dict[str, dict[str, int]] = {
     "fastest": {
@@ -21,38 +21,52 @@ _LATENCY_CAPS: dict[str, dict[str, int]] = {
         "max_playbooks": 1,
         "max_findings": 1,
         "snippet_chars": 60,
+        "max_output_tokens": 450,
     },
     "balanced": {
         "max_packs": 3,
         "max_paths": 2,
         "max_playbooks": 2,
-        "max_findings": 2,
+        "max_findings": 1,
         "snippet_chars": 80,
+        "max_output_tokens": 700,
     },
     "thorough": {
         "max_packs": 5,
         "max_paths": 3,
         "max_playbooks": 3,
         "max_findings": 2,
-        "snippet_chars": 120,
+        "snippet_chars": 100,
+        "max_output_tokens": 1000,
     },
 }
 
 _PUBLIC_ROUTES = frozenset({"/", "/health", "/api/health", "/status", "/ping"})
 
-_PRIORITY_SURFACE_TYPES = (
-    "config",
-    "auth",
-    "dependency",
-    "storage",
-    "ai",
-    "api",
-    "source",
-)
-
 
 def latency_caps(runtime_config: RuntimeConfig) -> dict[str, int]:
     return dict(_LATENCY_CAPS[runtime_config.effective_latency])
+
+
+def effective_max_confirmations(
+    runtime_config: RuntimeConfig,
+    candidates: list[AgentFindingDraft],
+) -> int:
+    caps = latency_caps(runtime_config)
+    max_findings = caps["max_findings"]
+    if runtime_config.effective_latency != "balanced":
+        return max_findings
+
+    high_signal = [
+        draft
+        for draft in candidates
+        if draft.confidence == "high"
+        and draft.vulnerability_class in {"secret-exposure", "bola", "privilege-escalation"}
+    ]
+    distinct = {draft.vulnerability_class for draft in high_signal}
+    if len(distinct) >= 2 and len(high_signal) >= 2:
+        return min(2, caps.get("max_findings_thorough_cap", 2))
+    return 1
 
 
 def _pack_priority(pack: EvidencePack) -> tuple[int, str]:
@@ -121,25 +135,9 @@ def _format_graph_path(
     return {
         "pathId": edge.id,
         "edgeType": edge.edge_type,
-        "label": edge.label,
-        "source": {
-            "nodeId": source.id,
-            "type": source.node_type,
-            "label": source.label,
-            "path": source.path,
-            "line": source.line_start,
-            "route": source.route,
-            "evidencePackId": source.evidence_pack_id,
-        },
-        "sink": {
-            "nodeId": sink.id,
-            "type": sink.node_type,
-            "label": sink.label,
-            "path": sink.path,
-            "line": sink.line_start,
-            "route": sink.route,
-            "evidencePackId": sink.evidence_pack_id,
-        },
+        "label": edge.label[:80],
+        "sourcePackId": source.evidence_pack_id,
+        "sinkPackId": sink.evidence_pack_id,
     }
 
 
@@ -184,20 +182,11 @@ def build_playbook_cards(
             continue
         reasons = skill.get("reasons", [])
         reason_list = [str(item) for item in reasons if isinstance(item, str)]
-        agent_types = skill.get("agentTypes", [])
-        type_list = [str(item) for item in agent_types if isinstance(item, str)]
-        checklist = reason_list[:3]
-        while len(checklist) < 3 and type_list:
-            checklist.append(f"Check {type_list.pop(0)} surfaces for concrete evidence")
         cards.append(
             {
                 "name": str(skill.get("name", "unknown")),
-                "whyRouted": reason_list[0] if reason_list else "matched repo signals",
-                "checklist": checklist[:3],
-                "verificationRule": (
-                    "Finding must cite evidencePackIds that match supplied pack snippets; "
-                    "reject generic route-validation noise."
-                ),
+                "whyRouted": (reason_list[0] if reason_list else "matched repo signals")[:100],
+                "checklist": reason_list[:3],
             }
         )
     return cards
@@ -210,32 +199,36 @@ def compact_pack_for_prompt(pack: EvidencePack, *, snippet_chars: int) -> dict[s
     payload: dict[str, Any] = {
         "id": pack.id,
         "surfaceType": pack.surface_type,
-        "kind": pack.kind,
         "path": pack.path,
         "lines": f"{pack.line_start}-{pack.line_end}",
         "snippet": snippet,
     }
     if pack.symbol:
         payload["symbol"] = pack.symbol
-    if pack.route and not is_public_route(pack.route):
-        payload["route"] = pack.route
     return payload
 
 
 def compact_candidate_for_prompt(draft: AgentFindingDraft) -> dict[str, Any]:
-    pack_ids = [
-        item.evidence_pack_id
-        for item in draft.evidence
-        if item.evidence_pack_id
-    ]
+    evidence_cards = []
+    for item in draft.evidence:
+        if not item.evidence_pack_id:
+            continue
+        evidence_cards.append(
+            {
+                "evidencePackId": item.evidence_pack_id,
+                "path": item.path,
+                "lineStart": item.line_start,
+                "lineEnd": item.line_end,
+                "snippet": redact_secrets(item.snippet or "")[:80],
+            }
+        )
     return {
         "candidateId": draft.id,
-        "title": redact_secrets(draft.title),
-        "vulnerabilityClass": draft.vulnerability_class,
+        "category": draft.vulnerability_class,
         "specialist": draft.specialist,
-        "claim": redact_secrets(draft.claim)[:200],
-        "evidencePackIds": pack_ids,
-        "source": "deterministic",
+        "title": redact_secrets(draft.title)[:120],
+        "evidencePackIds": [card["evidencePackId"] for card in evidence_cards],
+        "evidence": evidence_cards,
     }
 
 
@@ -248,73 +241,49 @@ def build_demo_llm_payload(
     runtime_config: RuntimeConfig,
 ) -> dict[str, Any]:
     caps = latency_caps(runtime_config)
-    selected_packs = select_top_evidence_packs(
-        evidence_packs,
-        max_packs=caps["max_packs"],
-    )
-    graph_paths = select_top_graph_paths(
-        attack_graph,
-        max_paths=caps["max_paths"],
-    )
-    playbook_cards = build_playbook_cards(
-        routed_skills,
-        max_playbooks=caps["max_playbooks"],
-    )
-
     non_generic_candidates = [
         draft
         for draft in deterministic_candidates
         if not _is_generic_route_validation_candidate(draft)
     ]
+    max_confirmations = effective_max_confirmations(runtime_config, non_generic_candidates)
 
     return {
-        "task": "demo_findings",
+        "task": "confirm_candidates",
         "promptVersion": DEMO_PROMPT_VERSION,
         "latencyMode": runtime_config.effective_latency,
-        "maxFindings": caps["max_findings"],
-        "priorities": [
-            "secret/config exposure",
-            "auth boundary issues",
-            "object ownership/BOLA",
-            "service-role/admin client misuse",
-            "AI/tool side effects",
-        ],
+        "maxConfirmations": max_confirmations,
         "evidencePacks": [
             compact_pack_for_prompt(pack, snippet_chars=caps["snippet_chars"])
-            for pack in selected_packs
+            for pack in select_top_evidence_packs(evidence_packs, max_packs=caps["max_packs"])
         ],
-        "graphPaths": graph_paths,
-        "playbookCards": playbook_cards,
+        "graphPaths": select_top_graph_paths(attack_graph, max_paths=caps["max_paths"]),
+        "playbookCards": build_playbook_cards(routed_skills, max_playbooks=caps["max_playbooks"]),
         "deterministicCandidates": [
-            compact_candidate_for_prompt(draft) for draft in non_generic_candidates[: caps["max_findings"] + 1]
+            compact_candidate_for_prompt(draft)
+            for draft in non_generic_candidates[: max_confirmations + 2]
         ],
         "responseSchema": {
-            "findings": [
+            "confirmations": [
                 {
-                    "id": "string",
-                    "title": "string",
-                    "vulnerability_class": "string",
-                    "claim": "string",
-                    "specialist": "string",
-                    "agent_type": "auth|api|secrets|storage|ai",
-                    "affected_surfaces": ["string"],
-                    "evidence_pack_ids": ["string"],
-                    "impact_hypothesis": "string",
-                    "attack_path": "string",
-                    "confidence": "high|medium|low",
+                    "candidateId": "string",
+                    "confirmed": "boolean",
                     "why_qa_misses_this": "string",
                     "why_code_review_misses_this": "string",
                     "suggested_regression_test": "string",
+                    "recommended_fix": "string",
                 }
             ],
             "reject_all": "boolean",
         },
         "rules": [
-            "Return at most maxFindings concrete findings OR set reject_all=true.",
-            "Every finding must cite at least one evidence_pack_id from evidencePacks.",
-            "Do not report generic GET route validation or public health endpoints.",
-            "Confirm deterministicCandidates only when evidence supports them; otherwise reject.",
-            "Return JSON only.",
+            "JSON only. No markdown. No prose outside JSON.",
+            "Confirm or reject existing deterministicCandidates only; do not invent new locations.",
+            "Set confirmed=true only when candidate evidencePackIds are sufficient.",
+            "Do not change paths, lines, snippets, or evidencePackIds.",
+            "Each string field: one sentence max.",
+            f"Return at most {max_confirmations} confirmed candidates or reject_all=true.",
+            "Reject generic route-validation and public health endpoint noise.",
         ],
     }
 

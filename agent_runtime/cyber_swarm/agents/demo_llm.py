@@ -1,74 +1,56 @@
-"""Focused demo-mode LLM finding generation."""
+"""Focused demo-mode LLM candidate confirmation."""
 
 from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 from cyber_swarm.agents.demo_prompt import (
     DEMO_PROMPT_VERSION,
     build_demo_llm_payload,
+    effective_max_confirmations,
     latency_caps,
     select_top_evidence_packs,
     select_top_graph_paths,
 )
-from cyber_swarm.agents.shared import skills_for_agent, static_reproduction
-from cyber_swarm.evidence.models import EvidencePack
-from cyber_swarm.evidence.packs import packs_by_id
-from cyber_swarm.evidence.refs import evidence_from_pack
 from cyber_swarm.metrics.timing import estimate_tokens
-from cyber_swarm.models.agents import AgentFindingDraft, QaComparison
+from cyber_swarm.models.agents import AgentFindingDraft, QaComparison, SafeReproduction
 from cyber_swarm.models.attack_graph import AttackGraph
 from cyber_swarm.models.runtime import RuntimeInput
 from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.providers.base import AgentProvider
-from cyber_swarm.providers.prompts import BASELINE_SYSTEM_PROMPT
+from cyber_swarm.providers.prompts import BASELINE_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT
 from cyber_swarm.rag.redaction import redact_secrets
 from cyber_swarm.schemas.llm_cache import (
-    evidence_hash,
-    graph_hash,
     llm_cache_key,
     llm_cache_path,
     read_llm_cache,
+    stable_evidence_hash,
+    stable_graph_hash,
     write_llm_cache,
 )
 
 DEMO_FINDINGS_SYSTEM_PROMPT = (
     BASELINE_SYSTEM_PROMPT
     + "\n\n"
-    + "Demo task: Given evidence packs, attack graph paths, and deterministic candidates, "
-    "produce at most the requested number of concrete security findings OR reject all. "
-    "Prioritize secret/config exposure, auth boundaries, BOLA, service-role misuse, and AI/tool side effects. "
-    "Do not emit generic route validation or public health endpoint noise. "
-    "Every finding must cite evidence_pack_ids from the supplied evidencePacks list."
+    + "Demo task: confirm or reject deterministicCandidates using supplied evidence only. "
+    + "Return short JSON with confirmations[] or reject_all=true. "
+    + "Never invent file paths, lines, snippets, or evidence pack IDs. "
+    + "One sentence per string field. No markdown."
 )
-
-_SPECIALIST_BY_AGENT = {
-    "auth": "auth-boundary",
-    "api": "api-abuse",
-    "secrets": "secrets-config",
-    "storage": "storage-access",
-    "ai": "ai-action-boundary",
-}
-
-
-def _canonical_specialist(agent_type: str, specialist: str | None = None) -> str:
-    if specialist in _SPECIALIST_BY_AGENT.values():
-        return specialist
-    return _SPECIALIST_BY_AGENT.get(agent_type, "api-abuse")
 
 
 def build_demo_llm_user_prompt(
     *,
-    evidence_packs: list[EvidencePack],
+    evidence_packs: list,
     attack_graph: AttackGraph | None,
     routed_skills: dict[str, Any],
     deterministic_candidates: list[AgentFindingDraft],
     runtime_config: RuntimeConfig,
-) -> tuple[str, dict[str, Any], list[EvidencePack], list[str]]:
+) -> tuple[str, dict[str, Any], list, list[str]]:
     payload = build_demo_llm_payload(
         evidence_packs=evidence_packs,
         attack_graph=attack_graph,
@@ -88,16 +70,17 @@ def run_demo_findings_with_provider(
     provider: AgentProvider,
     runtime_input: RuntimeInput,
     *,
-    evidence_packs: list[EvidencePack],
+    evidence_packs: list,
     attack_graph: AttackGraph | None,
     routed_skills: dict[str, Any],
     deterministic_candidates: list[AgentFindingDraft],
     runtime_config: RuntimeConfig,
-    scan_hash: str | None = None,
+    content_fingerprint: str | None = None,
+    scan_report: dict[str, Any] | None = None,
     output_path: str | None = None,
 ) -> tuple[list[AgentFindingDraft], dict[str, Any]]:
     prompt_started = time.perf_counter()
-    user, prompt_payload, selected_packs, path_ids = build_demo_llm_user_prompt(
+    user, _prompt_payload, selected_packs, path_ids = build_demo_llm_user_prompt(
         evidence_packs=evidence_packs,
         attack_graph=attack_graph,
         routed_skills=routed_skills,
@@ -105,7 +88,21 @@ def run_demo_findings_with_provider(
         runtime_config=runtime_config,
     )
     prompt_build_ms = round((time.perf_counter() - prompt_started) * 1000, 2)
+    caps = latency_caps(runtime_config)
+    max_output_tokens = caps["max_output_tokens"]
     input_token_estimate = estimate_tokens(DEMO_FINDINGS_SYSTEM_PROMPT + user)
+
+    evidence_key = stable_evidence_hash(selected_packs)
+    graph_key = stable_graph_hash(attack_graph, path_ids)
+    fingerprint = content_fingerprint or ""
+    cache_key = llm_cache_key(
+        content_fingerprint=fingerprint,
+        evidence_key=evidence_key,
+        graph_key=graph_key,
+        provider=runtime_config.provider,
+        model=runtime_config.model,
+        latency_mode=runtime_config.effective_latency,
+    )
 
     cache_meta: dict[str, Any] = {
         "hit": False,
@@ -113,30 +110,19 @@ def run_demo_findings_with_provider(
         "latencyMode": runtime_config.effective_latency,
         "inputTokenEstimate": input_token_estimate,
         "promptBuildMs": prompt_build_ms,
+        "cacheKey": cache_key,
+        "cacheKeyPrefix": cache_key[:8],
+        "evidenceHash": evidence_key,
+        "graphHash": graph_key,
+        "contentFingerprint": fingerprint,
+        "maxOutputTokens": max_output_tokens,
     }
-
-    evidence_key = evidence_hash(selected_packs)
-    graph_key = graph_hash(attack_graph, path_ids)
-    cache_key = llm_cache_key(
-        scan_hash=scan_hash or "",
-        evidence_key=evidence_key,
-        graph_key=graph_key,
-        provider=runtime_config.provider,
-        model=runtime_config.model,
-        latency_mode=runtime_config.effective_latency,
-    )
-    cache_meta["cacheKey"] = cache_key
-    cache_meta["evidenceHash"] = evidence_key
-    cache_meta["graphHash"] = graph_key
 
     llm_payload: dict[str, Any] | None = None
     call_meta: dict[str, Any] | None = None
+    repair_attempted = False
 
-    if (
-        output_path
-        and scan_hash
-        and not runtime_config.force_llm
-    ):
+    if output_path and fingerprint and not runtime_config.force_llm:
         cached = read_llm_cache(llm_cache_path(Path(output_path), cache_key))
         if cached is not None:
             llm_payload = cached.get("llmPayload")
@@ -144,24 +130,25 @@ def run_demo_findings_with_provider(
             cache_meta["hit"] = True
 
     if llm_payload is None:
-        call_started = time.perf_counter()
-        result = provider.complete_json(
-            system=DEMO_FINDINGS_SYSTEM_PROMPT,
+        llm_payload, call_meta, repair_attempted = _call_with_optional_repair(
+            provider,
             user=user,
-            purpose="demo_findings",
+            deterministic_candidates=deterministic_candidates,
+            runtime_config=runtime_config,
+            max_output_tokens=max_output_tokens,
+            scan_report=scan_report or {},
+            evidence_packs=evidence_packs,
         )
-        model_latency_ms = round((time.perf_counter() - call_started) * 1000, 2)
-        llm_payload = result.payload
-        call_meta = asdict(result)
         cache_meta["hit"] = False
-        cache_meta["outputTokens"] = result.completion_tokens
-        cache_meta["modelLatencyMs"] = model_latency_ms
+        cache_meta["outputTokens"] = (call_meta or {}).get("completion_tokens")
+        cache_meta["modelLatencyMs"] = (call_meta or {}).get("elapsed_ms", 0)
+        cache_meta["repairAttempted"] = repair_attempted
 
-        if output_path and scan_hash:
+        if output_path and fingerprint:
             write_llm_cache(
                 llm_cache_path(Path(output_path), cache_key),
                 cache_key=cache_key,
-                scan_hash=scan_hash,
+                content_fingerprint=fingerprint,
                 evidence_key=evidence_key,
                 graph_key=graph_key,
                 provider=runtime_config.provider,
@@ -174,119 +161,188 @@ def run_demo_findings_with_provider(
         cache_meta["outputTokens"] = (call_meta or {}).get("completion_tokens")
         cache_meta["modelLatencyMs"] = (call_meta or {}).get("elapsed_ms", 0)
 
-    max_findings = latency_caps(runtime_config)["max_findings"]
-    drafts = parse_demo_findings_payload(
+    output_tokens = cache_meta.get("outputTokens")
+    if isinstance(output_tokens, int) and output_tokens > max_output_tokens:
+        cache_meta["outputTokenWarning"] = (
+            f"output tokens {output_tokens} exceeded cap {max_output_tokens}"
+        )
+
+    drafts, merge_issues = merge_confirmations(
+        deterministic_candidates,
         llm_payload or {},
-        runtime_input,
-        evidence_packs,
-        max_findings=max_findings,
+        runtime_config=runtime_config,
     )
 
-    stage_metrics = {
-        "mode": "openai" if runtime_config.provider == "openai" else runtime_config.provider,
+    stage_metrics: dict[str, Any] = {
+        "mode": runtime_config.provider,
         "purpose": "demo_findings",
         "call": call_meta,
         "llmCache": cache_meta,
         "draftCount": len(drafts),
+        "mergeIssues": merge_issues,
         "promptVersion": DEMO_PROMPT_VERSION,
+        "repairAttempted": repair_attempted,
     }
+    if not drafts and deterministic_candidates:
+        stage_metrics["fallbackReason"] = (
+            "LLM produced candidates, but none were confirmed for verification"
+        )
     return drafts, stage_metrics
+
+
+def _call_with_optional_repair(
+    provider: AgentProvider,
+    *,
+    user: str,
+    deterministic_candidates: list[AgentFindingDraft],
+    runtime_config: RuntimeConfig,
+    max_output_tokens: int,
+    scan_report: dict[str, Any],
+    evidence_packs: list,
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    call_started = time.perf_counter()
+    result = provider.complete_json(
+        system=DEMO_FINDINGS_SYSTEM_PROMPT,
+        user=user,
+        purpose="demo_findings",
+        max_output_tokens=max_output_tokens,
+    )
+    payload = result.payload
+    call_meta = asdict(result)
+    call_meta["elapsed_ms"] = round((time.perf_counter() - call_started) * 1000, 2)
+
+    drafts, merge_issues = merge_confirmations(
+        deterministic_candidates,
+        payload,
+        runtime_config=runtime_config,
+    )
+    if drafts or payload.get("reject_all") is True or not deterministic_candidates:
+        return payload, call_meta, False
+
+    repair_user = json.dumps(
+        {
+            "task": "repair_confirmations",
+            "issues": merge_issues or ["No valid confirmations returned."],
+            "original": json.loads(user),
+            "badResponse": payload,
+            "responseSchema": {
+                "confirmations": [{"candidateId": "string", "confirmed": "boolean"}],
+                "reject_all": "boolean",
+            },
+        },
+        separators=(",", ":"),
+    )
+    repair_started = time.perf_counter()
+    repair_result = provider.complete_json(
+        system=REPAIR_SYSTEM_PROMPT,
+        user=repair_user,
+        purpose="demo_findings_repair",
+        max_output_tokens=max_output_tokens,
+    )
+    repair_meta = asdict(repair_result)
+    repair_meta["elapsed_ms"] = round((time.perf_counter() - repair_started) * 1000, 2)
+    call_meta["repair"] = repair_meta
+    call_meta["completion_tokens"] = (result.completion_tokens or 0) + (
+        repair_result.completion_tokens or 0
+    )
+    call_meta["elapsed_ms"] = round((time.perf_counter() - call_started) * 1000, 2)
+    return repair_result.payload, call_meta, True
+
+
+def merge_confirmations(
+    candidates: list[AgentFindingDraft],
+    payload: dict[str, Any],
+    *,
+    runtime_config: RuntimeConfig,
+) -> tuple[list[AgentFindingDraft], list[str]]:
+    issues: list[str] = []
+    if payload.get("reject_all") is True:
+        return [], ["LLM rejected all candidates"]
+
+    candidate_by_id = {draft.id: draft for draft in candidates}
+    merged: list[AgentFindingDraft] = []
+    max_confirmations = effective_max_confirmations(runtime_config, candidates)
+
+    for item in payload.get("confirmations", []):
+        if not isinstance(item, dict):
+            issues.append("confirmation entry is not an object")
+            continue
+        if item.get("confirmed") is not True:
+            continue
+
+        candidate_id = str(item.get("candidateId", "")).strip()
+        base = candidate_by_id.get(candidate_id)
+        if base is None:
+            issues.append(f"unknown candidateId: {candidate_id or 'missing'}")
+            continue
+
+        llm_pack_ids = {
+            str(value).strip()
+            for value in item.get("evidence_pack_ids", [])
+            if isinstance(value, str) and value.strip()
+        }
+        if llm_pack_ids:
+            base_pack_ids = {
+                ref.evidence_pack_id for ref in base.evidence if ref.evidence_pack_id
+            }
+            if llm_pack_ids != base_pack_ids:
+                issues.append(f"candidate {candidate_id} attempted to change evidence pack IDs")
+                continue
+
+        qa = QaComparison(
+            why_qa_may_miss=_one_sentence(item.get("why_qa_misses_this", "")),
+            why_review_may_miss=_one_sentence(item.get("why_code_review_misses_this", "")),
+            suggested_regression_test=_one_sentence(item.get("suggested_regression_test", "")),
+        )
+        recommended_fix = _one_sentence(item.get("recommended_fix", ""))
+        reproduction = base.safe_reproduction
+        if recommended_fix:
+            reproduction = SafeReproduction(
+                mode=reproduction.mode,
+                steps=[*reproduction.steps[:2], recommended_fix][:3],
+                expected_result=reproduction.expected_result,
+                safety_notes=reproduction.safety_notes,
+            )
+
+        merged.append(
+            replace(
+                base,
+                qa_comparison=qa
+                if any((qa.why_qa_may_miss, qa.why_review_may_miss, qa.suggested_regression_test))
+                else None,
+                safe_reproduction=reproduction,
+            )
+        )
+        if len(merged) >= max_confirmations:
+            break
+
+    return merged, issues
 
 
 def parse_demo_findings_payload(
     payload: dict[str, Any],
     runtime_input: RuntimeInput,
-    evidence_packs: list[EvidencePack],
+    evidence_packs: list,
     *,
     max_findings: int,
+    deterministic_candidates: list[AgentFindingDraft] | None = None,
 ) -> list[AgentFindingDraft]:
-    if payload.get("reject_all") is True:
-        return []
-
-    pack_index = packs_by_id(evidence_packs)
-    parsed: list[AgentFindingDraft] = []
-
-    for index, item in enumerate(payload.get("findings", [])):
-        if not isinstance(item, dict):
-            continue
-        draft = _finding_item_to_draft(
-            item,
-            runtime_input,
-            pack_index,
-            draft_index=index + 1,
-        )
-        if draft is not None:
-            parsed.append(draft)
-        if len(parsed) >= max_findings:
-            break
-
-    return parsed
-
-
-def _finding_item_to_draft(
-    item: dict[str, Any],
-    runtime_input: RuntimeInput,
-    pack_index: dict[str, EvidencePack],
-    *,
-    draft_index: int,
-) -> AgentFindingDraft | None:
-    pack_ids = [
-        str(value)
-        for value in item.get("evidence_pack_ids", [])
-        if isinstance(value, str) and value.strip()
-    ]
-    if not pack_ids:
-        return None
-
-    evidence = []
-    for pack_id in pack_ids:
-        pack = pack_index.get(pack_id)
-        if pack is None:
-            return None
-        explanation = redact_secrets(
-            str(item.get("claim", item.get("title", "Security finding")))[:240]
-        )
-        evidence.append(evidence_from_pack(pack, explanation))
-
-    agent_type = str(item.get("agent_type", "secrets"))
-    specialist = _canonical_specialist(
-        agent_type,
-        str(item.get("specialist", "")) if item.get("specialist") else None,
+    """Backward-compatible parse entrypoint used in tests."""
+    del runtime_input, evidence_packs
+    runtime_config = RuntimeConfig(mode="demo", latency="balanced")
+    drafts, _ = merge_confirmations(
+        deterministic_candidates or [],
+        payload,
+        runtime_config=runtime_config,
     )
-    title = redact_secrets(str(item.get("title", "Security finding")))
-    claim = redact_secrets(str(item.get("claim", title)))
-    surfaces = [
-        str(surface)
-        for surface in item.get("affected_surfaces", [])
-        if isinstance(surface, str)
-    ]
+    return drafts[:max_findings]
 
-    qa = QaComparison(
-        why_qa_may_miss=str(item.get("why_qa_misses_this", "")),
-        why_review_may_miss=str(item.get("why_code_review_misses_this", "")),
-        suggested_regression_test=str(item.get("suggested_regression_test", "")),
-    )
 
-    return AgentFindingDraft(
-        id=str(item.get("id", f"draft-llm-{draft_index}")),
-        title=title,
-        vulnerability_class=str(item.get("vulnerability_class", "security-misconfiguration")),
-        claim=claim,
-        affected_surfaces=surfaces,
-        evidence=evidence,
-        impact_hypothesis=redact_secrets(str(item.get("impact_hypothesis", ""))),
-        attack_path=redact_secrets(str(item.get("attack_path", ""))),
-        safe_reproduction=static_reproduction(
-            [
-                f"Open {evidence[0].path}:{evidence[0].line_start} and inspect cited evidence.",
-                qa.suggested_regression_test or "Add regression coverage for this boundary.",
-            ],
-            claim[:180] or "Static evidence supports the reported issue.",
-        ),
-        confidence=item.get("confidence", "medium"),  # type: ignore[arg-type]
-        agent_type=agent_type,
-        specialist=specialist,
-        selected_skills=skills_for_agent(runtime_input, agent_type),
-        retrieval_trace=[],
-        qa_comparison=qa if any((qa.why_qa_may_miss, qa.why_review_may_miss, qa.suggested_regression_test)) else None,
-    )
+def _one_sentence(value: Any) -> str:
+    text = redact_secrets(str(value or "")).strip()
+    if not text:
+        return ""
+    first = text.split(". ")[0].strip()
+    if len(first) > 180:
+        return first[:177] + "..."
+    return first if first.endswith(".") else f"{first}."

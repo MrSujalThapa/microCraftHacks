@@ -156,6 +156,20 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
   printMetric("Rejected findings", activation.findingsRejected);
 
   const findingsReport = loadFindingsReport(agentResult.outputPath);
+
+  if (activation.findingsVerified === 0 && findingsReport.rejectedFindings.length > 0) {
+    console.log("");
+    console.log("  LLM produced candidates, but verifier rejected them:");
+    for (const item of findingsReport.rejectedFindings.slice(0, 6)) {
+      const label = item.title ?? item.draft_id ?? "unknown draft";
+      const checks =
+        item.failed_checks && item.failed_checks.length > 0
+          ? item.failed_checks.slice(0, 2).join("; ")
+          : item.reason ?? "rejected";
+      console.log(`    - ${label}: ${checks}`);
+    }
+  }
+
   const demoFindings = filterDemoFindings(findingsReport.verifiedFindings);
   const bestFinding = findBestDemoFinding(findingsReport.verifiedFindings);
 

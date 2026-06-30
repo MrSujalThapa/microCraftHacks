@@ -271,13 +271,16 @@ def specialist_agents_node(state: GraphState) -> GraphState:
                 routed_skills=state.get("routed_skills", {}),
                 deterministic_candidates=drafts,
                 runtime_config=runtime_config,
-                scan_hash=state.get("scan_hash"),
+                content_fingerprint=state.get("stable_content_fingerprint"),
+                scan_report=state.get("scan_report", {}),
                 output_path=state.get("output_path"),
             )
             provider_metrics["demo_findings"] = llm_stage
         except Exception as error:  # noqa: BLE001
             llm_stage = {"mode": "fallback", "error": str(error)}
             provider_metrics["demo_findings"] = llm_stage
+            # Keep deterministic drafts when LLM fails; secrets remain verifier-eligible.
+            llm_drafts = []
         metrics = merge_stage_timing(
             metrics,
             "llm_call",

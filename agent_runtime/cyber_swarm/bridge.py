@@ -15,6 +15,7 @@ from cyber_swarm.schemas.cache import (
     scan_content_hash,
     write_cache_metadata,
 )
+from cyber_swarm.demo.diagnostics import print_rejection_diagnostics
 from cyber_swarm.schemas.io import write_json
 from cyber_swarm.schemas.report_md import write_markdown_report
 
@@ -61,12 +62,18 @@ def _print_summary(output: dict) -> None:
         llm_cache = runtime.get("llmCache", {})
         if isinstance(llm_cache, dict) and llm_cache:
             print(f"  LLM cache: {'hit' if llm_cache.get('hit') else 'miss'}")
+            if llm_cache.get("evidenceHash"):
+                print(f"  Stable evidence hash: {llm_cache.get('evidenceHash')}")
+            if llm_cache.get("cacheKeyPrefix"):
+                print(f"  LLM cache key prefix: {llm_cache.get('cacheKeyPrefix')}")
             if llm_cache.get("inputTokenEstimate") is not None:
                 print(f"  Input token estimate: {llm_cache.get('inputTokenEstimate')}")
             if llm_cache.get("outputTokens") is not None:
                 print(f"  Output tokens: {llm_cache.get('outputTokens')}")
             if llm_cache.get("modelLatencyMs") is not None:
                 print(f"  Model latency: {llm_cache.get('modelLatencyMs')} ms")
+            if llm_cache.get("outputTokenWarning"):
+                print(f"  Warning: {llm_cache.get('outputTokenWarning')}")
         calls = runtime.get("providerCalls", [])
         if isinstance(cache, dict) and cache.get("hit"):
             print("  Model calls: 0")
@@ -106,6 +113,13 @@ def _print_summary(output: dict) -> None:
             + ", ".join(f"{key}={value}" for key, value in severity_counts.items() if value)
             or "none"
         )
+    if len(verified) == 0:
+        demo_llm = metrics.get("specialist_agents", {}).get("demoLlm", {})
+        if isinstance(demo_llm, dict) and demo_llm.get("fallbackReason"):
+            print(f"  Demo LLM: {demo_llm.get('fallbackReason')}")
+        if isinstance(demo_llm, dict) and demo_llm.get("mode") == "fallback":
+            print(f"  Demo LLM fallback: {demo_llm.get('error', 'LLM unavailable')}")
+        print_rejection_diagnostics(output)
 
 
 def run_bridge(

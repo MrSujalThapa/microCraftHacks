@@ -14,6 +14,7 @@ from cyber_swarm.schemas.report_md import write_markdown_report
 from cyber_swarm.graph.state import GraphState
 from cyber_swarm.metrics.timing import merge_stage_timing
 from cyber_swarm.rag.loop import serialize_context
+from cyber_swarm.schemas.llm_cache import normalized_scan_fingerprint
 from cyber_swarm.rag.normalize import normalize_runtime_input
 
 
@@ -29,62 +30,66 @@ def load_input(state: GraphState) -> GraphState:
 
     runtime_input = normalize_runtime_input(scan_report_path, routed_skills_path)
 
+    scan_report = {
+        "version": runtime_input.repo.version,
+        "scannedAt": runtime_input.repo.scanned_at,
+        "projectRoot": runtime_input.repo.project_root,
+        "inventory": {
+            "totalFiles": runtime_input.repo.inventory.total_files,
+            "byCategory": runtime_input.repo.inventory.by_category,
+            "files": [
+                {"path": item.path, "category": item.category}
+                for item in runtime_input.repo.inventory.files
+            ],
+        },
+        "stack": [
+            {
+                "name": item.name,
+                "confidence": item.confidence,
+                "evidence": item.evidence,
+            }
+            for item in runtime_input.repo.stack
+        ],
+        "surfaces": {
+            "routes": [
+                {
+                    "path": route.path,
+                    "file": route.file,
+                    **({"framework": route.framework} if route.framework else {}),
+                }
+                for route in runtime_input.repo.surfaces.routes
+            ],
+            "api": [
+                {
+                    "path": route.path,
+                    "file": route.file,
+                    **({"framework": route.framework} if route.framework else {}),
+                }
+                for route in runtime_input.repo.surfaces.api
+            ],
+            "auth": [
+                {
+                    "file": auth.file,
+                    **({"type": auth.type} if auth.type else {}),
+                }
+                for auth in runtime_input.repo.surfaces.auth
+            ],
+            "dataModels": [
+                {
+                    "file": model.file,
+                    **({"name": model.name} if model.name else {}),
+                }
+                for model in runtime_input.repo.surfaces.data_models
+            ],
+        },
+    }
+    stable_fingerprint = normalized_scan_fingerprint(scan_report)
+
     return {
         **state,
         "runtime_input": runtime_input,
-        "scan_report": {
-            "version": runtime_input.repo.version,
-            "scannedAt": runtime_input.repo.scanned_at,
-            "projectRoot": runtime_input.repo.project_root,
-            "inventory": {
-                "totalFiles": runtime_input.repo.inventory.total_files,
-                "byCategory": runtime_input.repo.inventory.by_category,
-                "files": [
-                    {"path": item.path, "category": item.category}
-                    for item in runtime_input.repo.inventory.files
-                ],
-            },
-            "stack": [
-                {
-                    "name": item.name,
-                    "confidence": item.confidence,
-                    "evidence": item.evidence,
-                }
-                for item in runtime_input.repo.stack
-            ],
-            "surfaces": {
-                "routes": [
-                    {
-                        "path": route.path,
-                        "file": route.file,
-                        **({"framework": route.framework} if route.framework else {}),
-                    }
-                    for route in runtime_input.repo.surfaces.routes
-                ],
-                "api": [
-                    {
-                        "path": route.path,
-                        "file": route.file,
-                        **({"framework": route.framework} if route.framework else {}),
-                    }
-                    for route in runtime_input.repo.surfaces.api
-                ],
-                "auth": [
-                    {
-                        "file": auth.file,
-                        **({"type": auth.type} if auth.type else {}),
-                    }
-                    for auth in runtime_input.repo.surfaces.auth
-                ],
-                "dataModels": [
-                    {
-                        "file": model.file,
-                        **({"name": model.name} if model.name else {}),
-                    }
-                    for model in runtime_input.repo.surfaces.data_models
-                ],
-            },
-        },
+        "scan_report": scan_report,
+        "stable_content_fingerprint": stable_fingerprint,
         "routed_skills": {
             "reportPath": runtime_input.routed_skills.report_path,
             "routedAt": runtime_input.routed_skills.routed_at,
@@ -109,6 +114,7 @@ def load_input(state: GraphState) -> GraphState:
                 "status": "completed",
                 "routedSkillCount": len(runtime_input.routed_skills.selected),
                 "normalized": True,
+                "stableContentFingerprint": stable_fingerprint,
             },
         ),
     }

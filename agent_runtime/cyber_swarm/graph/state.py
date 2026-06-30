@@ -16,6 +16,7 @@ class GraphState(TypedDict, total=False):
     routed_skills_path: str
     output_path: str
     scan_hash: str
+    stable_content_fingerprint: str
     runtime_input: RuntimeInput
     scan_report: dict[str, Any]
     routed_skills: dict[str, Any]

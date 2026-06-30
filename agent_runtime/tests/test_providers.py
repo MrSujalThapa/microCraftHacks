@@ -31,22 +31,26 @@ def test_mock_provider_records_calls_without_network():
     assert provider.call_log()[0]["mock"] is True
 
 
-def test_mock_provider_returns_demo_findings_payload():
+def test_mock_provider_returns_demo_confirmations_payload():
     provider = MockProvider()
     user = json.dumps(
         {
-            "evidencePacks": [
+            "deterministicCandidates": [
                 {
-                    "id": "pack-1",
-                    "surfaceType": "config",
-                    "path": "backend/.env",
-                    "symbol": "API_KEY",
+                    "candidateId": "draft-det-secret-1",
+                    "evidencePackIds": ["pack-1"],
                 }
             ]
         }
     )
-    result = provider.complete_json(system="sys", user=user, purpose="demo_findings")
-    assert result.payload["findings"][0]["evidence_pack_ids"] == ["pack-1"]
+    result = provider.complete_json(
+        system="sys",
+        user=user,
+        purpose="demo_findings",
+        max_output_tokens=700,
+    )
+    assert result.payload["confirmations"][0]["candidateId"] == "draft-det-secret-1"
+    assert provider.call_log()[0]["maxOutputTokens"] == 700
 
 
 def test_openai_provider_repairs_invalid_json(monkeypatch: pytest.MonkeyPatch):

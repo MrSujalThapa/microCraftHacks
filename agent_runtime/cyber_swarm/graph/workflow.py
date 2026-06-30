@@ -102,6 +102,7 @@ def run_workflow(
             "routed_skills_path": str(routed_skills_path),
             "output_path": str(output_path),
             "scan_hash": scan_hash or "",
+            "stable_content_fingerprint": "",
             "runtime_config": config,
             "provider": provider,
             "provider_metrics": {},

@@ -21,7 +21,14 @@ class ProviderCallResult:
 class AgentProvider(Protocol):
     model: str
 
-    def complete_json(self, *, system: str, user: str, purpose: str) -> ProviderCallResult:
+    def complete_json(
+        self,
+        *,
+        system: str,
+        user: str,
+        purpose: str,
+        max_output_tokens: int | None = None,
+    ) -> ProviderCallResult:
         """Return structured JSON from the provider."""
 
     def call_log(self) -> list[dict[str, Any]]:
