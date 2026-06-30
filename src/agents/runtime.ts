@@ -49,6 +49,14 @@ export interface AgentRunResult {
       scanHash?: string;
       hit?: boolean;
     };
+    demoLlm?: {
+      providerCallsAttempted?: number;
+      confirmationsAccepted?: number;
+      fallbackUsed?: boolean;
+      fallbackMessage?: string;
+      fallbackReason?: string;
+      error?: string;
+    };
   };
 }
 
@@ -112,6 +120,12 @@ function readRuntimeMetrics(outputPath: string): AgentRunResult["runtimeMetrics"
           cache?: {
             scanHash?: string;
             hit?: boolean;
+          };
+          demoLlm?: {
+            providerCallsAttempted?: number;
+            confirmationsAccepted?: number;
+            fallbackUsed?: boolean;
+            fallbackMessage?: string;
           };
         };
       };

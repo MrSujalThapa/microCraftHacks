@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from cyber_swarm.agents.demo_llm import merge_confirmations, parse_demo_findings_payload, run_demo_findings_with_provider
+from cyber_swarm.agents.demo_llm import (
+    DEMO_LLM_FALLBACK_MESSAGE,
+    merge_confirmations,
+    parse_demo_findings_payload,
+    run_demo_findings_with_provider,
+)
 from cyber_swarm.agents.demo_prompt import (
     _is_generic_route_validation_candidate,
     build_demo_llm_payload,
@@ -28,7 +33,7 @@ from cyber_swarm.models.repo import FileInventoryItem, InventoryResult, RepoInte
 from cyber_swarm.models.runtime import RuntimeInput
 from cyber_swarm.models.skills import RoutedSkills, SelectedSkill
 from cyber_swarm.models.runtime_config import RuntimeConfig
-from cyber_swarm.providers.mock import MockProvider
+from cyber_swarm.providers.mock import MockProvider, UnusableConfirmationMockProvider
 from cyber_swarm.rag.redaction import contains_raw_secret
 from cyber_swarm.schemas.cache import scan_content_hash
 from cyber_swarm.schemas.llm_cache import llm_cache_key, normalized_scan_fingerprint, stable_evidence_hash
@@ -163,6 +168,36 @@ def test_prompt_builder_respects_caps():
     assert len(payload["playbookCards"]) <= 2
     assert payload["maxConfirmations"] == 1
     assert "SKILL.md" not in json.dumps(payload)
+
+
+def test_balanced_mode_always_caps_to_one_confirmation():
+    secret = AgentFindingDraft(
+        id="draft-secret",
+        title="Secret A",
+        vulnerability_class="secret-exposure",
+        claim="Secret A exposed",
+        affected_surfaces=[],
+        evidence=[evidence_from_pack(_secret_pack(), "Secret A exposed in backend/.env:4")],
+        impact_hypothesis="Impact",
+        attack_path="Inspect backend/.env",
+        safe_reproduction=static_reproduction(["Open file"], "Secret visible"),
+        confidence="high",
+        agent_type="secrets",
+        specialist="secrets-config",
+        selected_skills=[],
+        retrieval_trace=[],
+    )
+    bola = replace(
+        secret,
+        id="draft-bola",
+        title="BOLA risk",
+        vulnerability_class="bola",
+        specialist="object-ownership",
+    )
+    assert effective_max_confirmations(
+        RuntimeConfig(mode="demo", latency="balanced"),
+        [secret, bola],
+    ) == 1
 
 
 def test_balanced_mode_caps_to_one_confirmation_by_default():
@@ -455,6 +490,82 @@ def test_stable_llm_cache_key_ignores_scan_timestamp(tmp_path: Path):
     assert key_a == key_b
 
 
+def test_blank_llm_response_preserves_deterministic_verified_finding(tmp_path, monkeypatch):
+    scan_report_path = tmp_path / "scan-blank-llm.json"
+    routed_skills_path = tmp_path / "routed-blank-llm.json"
+    output_path = tmp_path / "scan-blank-llm-findings.json"
+    _secret_runtime_input(tmp_path)
+
+    scan_report_path.write_text(json.dumps(_scan_report_for(tmp_path)), encoding="utf-8")
+    routed_skills_path.write_text(
+        json.dumps(
+            {
+                "reportPath": str(scan_report_path),
+                "routedAt": "2026-06-29T12:01:00.000Z",
+                "selected": [
+                    {
+                        "name": "secrets-skill",
+                        "path": "skills/secrets/SKILL.md",
+                        "score": 0.9,
+                        "reasons": ["env file detected"],
+                        "agentTypes": ["secrets"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "cyber_swarm.graph.workflow.create_provider",
+        lambda *_args, **_kwargs: UnusableConfirmationMockProvider(),
+    )
+    monkeypatch.setattr(
+        "cyber_swarm.providers.factory.create_provider",
+        lambda *_args, **_kwargs: UnusableConfirmationMockProvider(),
+    )
+
+    output = run_workflow(
+        scan_report_path,
+        routed_skills_path,
+        output_path,
+        runtime_config=RuntimeConfig(provider="mock", mode="demo", force_llm=True),
+        scan_hash=scan_content_hash(scan_report_path),
+    )
+
+    demo_llm = output["metrics"]["runtime"]["demoLlm"]
+    assert demo_llm["fallbackUsed"] is True
+    assert demo_llm["fallbackMessage"] == DEMO_LLM_FALLBACK_MESSAGE
+    assert demo_llm["confirmationsAccepted"] == 0
+    assert demo_llm["providerCallsAttempted"] >= 1
+    assert len(output["metrics"]["runtime"]["providerCalls"]) >= 1
+    assert len(output["verifiedFindings"]) >= 1
+    assert output["verifiedFindings"][0]["vulnerability_class"] == "secret-exposure"
+
+
+def test_unusable_llm_response_reports_fallback_telemetry(tmp_path):
+    provider = UnusableConfirmationMockProvider()
+    runtime = _secret_runtime_input(tmp_path)
+    packs = build_evidence_packs(tmp_path, runtime.repo, {"backend/.env"})
+    drafts = build_deterministic_secret_drafts(runtime, packs, [])
+
+    _drafts, stage = run_demo_findings_with_provider(
+        provider,
+        runtime,
+        evidence_packs=packs,
+        attack_graph=None,
+        routed_skills={"selected": []},
+        deterministic_candidates=drafts,
+        runtime_config=RuntimeConfig(provider="mock", mode="demo", latency="balanced"),
+        content_fingerprint=normalized_scan_fingerprint(_scan_report_for(tmp_path)),
+    )
+
+    assert stage["fallbackUsed"] is True
+    assert stage["fallbackMessage"] == DEMO_LLM_FALLBACK_MESSAGE
+    assert stage["confirmationsAccepted"] == 0
+    assert stage["providerCallsAttempted"] >= 1
+
+
 def test_output_token_cap_passed_to_provider(tmp_path: Path):
     provider = MockProvider()
     runtime = _secret_runtime_input(tmp_path)
@@ -471,7 +582,7 @@ def test_output_token_cap_passed_to_provider(tmp_path: Path):
         runtime_config=RuntimeConfig(provider="mock", mode="demo", latency="balanced"),
         content_fingerprint=normalized_scan_fingerprint(_scan_report_for(tmp_path)),
     )
-    assert provider.call_log()[0]["maxOutputTokens"] == 700
+    assert provider.call_log()[0]["maxOutputTokens"] == 600
 
 
 def test_prompt_never_contains_raw_secrets():

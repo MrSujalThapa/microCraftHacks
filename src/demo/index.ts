@@ -52,20 +52,42 @@ function summarizeRuntimeMetrics(
     return sum + (typeof tokens === "number" ? tokens : 0);
   }, 0);
 
+  const cacheHit = result.runtimeMetrics?.cache?.hit;
+  const demoLlm = result.runtimeMetrics?.demoLlm;
+
   return {
     provider: result.provider,
     model: result.model,
     mode: result.runtimeMetrics?.mode,
     latencyMode: result.runtimeMetrics?.latencyMode,
     elapsedMs: result.runtimeMetrics?.elapsedMs,
-    cacheHit: result.runtimeMetrics?.cache?.hit,
+    cacheHit,
     scanHash: result.runtimeMetrics?.cache?.scanHash,
     llmCacheHit: result.runtimeMetrics?.llmCache?.hit,
     inputTokenEstimate: result.runtimeMetrics?.llmCache?.inputTokenEstimate,
     outputTokens: result.runtimeMetrics?.llmCache?.outputTokens,
     modelLatencyMs: result.runtimeMetrics?.llmCache?.modelLatencyMs,
     stageTimings: result.runtimeMetrics?.stageTimings,
-    modelCalls: result.runtimeMetrics?.cache?.hit ? 0 : calls.length,
+    providerCallsAttempted: cacheHit
+      ? 0
+      : typeof demoLlm?.providerCallsAttempted === "number"
+        ? demoLlm.providerCallsAttempted
+        : calls.length,
+    confirmationsAccepted: cacheHit
+      ? undefined
+      : typeof demoLlm?.confirmationsAccepted === "number"
+        ? demoLlm.confirmationsAccepted
+        : undefined,
+    fallbackUsed: cacheHit
+      ? undefined
+      : typeof demoLlm?.fallbackUsed === "boolean"
+        ? demoLlm.fallbackUsed
+        : undefined,
+    fallbackMessage:
+      cacheHit || typeof demoLlm?.fallbackMessage !== "string"
+        ? undefined
+        : demoLlm.fallbackMessage,
+    modelCalls: cacheHit ? 0 : calls.length,
     tokens: totalTokens > 0 ? totalTokens : undefined,
   };
 }

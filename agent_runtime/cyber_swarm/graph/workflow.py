@@ -122,6 +122,7 @@ def run_workflow(
         raise RuntimeError("LangGraph workflow did not produce output")
 
     provider_metrics = final_state.get("provider_metrics", {})
+    demo_llm = provider_metrics.get("demo_findings", {})
     runtime_metrics: dict[str, Any] = {
         "provider": config.provider,
         "model": config.model,
@@ -142,6 +143,8 @@ def run_workflow(
             "hit": False,
         },
     }
+    if isinstance(demo_llm, dict) and demo_llm:
+        runtime_metrics["demoLlm"] = demo_llm
     output_metrics = dict(output.get("metrics", {}))
     output_metrics["runtime"] = runtime_metrics
     output["metrics"] = output_metrics

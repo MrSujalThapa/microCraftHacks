@@ -46,6 +46,39 @@ class MockProvider:
         return list(self._calls)
 
 
+class UnusableConfirmationMockProvider(MockProvider):
+    """Returns empty confirmations so tests can exercise deterministic fallback."""
+
+    def complete_json(
+        self,
+        *,
+        system: str,
+        user: str,
+        purpose: str,
+        max_output_tokens: int | None = None,
+    ) -> ProviderCallResult:
+        self._calls.append(
+            {
+                "purpose": purpose,
+                "model": self.model,
+                "systemLength": len(system),
+                "userLength": len(user),
+                "maxOutputTokens": max_output_tokens,
+                "mock": True,
+                "unusable": True,
+            }
+        )
+        return ProviderCallResult(
+            purpose=purpose,
+            model=self.model,
+            elapsed_ms=0.0,
+            payload={"confirmations": [], "reject_all": False},
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        )
+
+
 def _mock_payload(purpose: str, user: str) -> dict[str, Any]:
     if purpose not in {"demo_findings", "demo_findings_repair"}:
         return {"status": "mock", "purpose": purpose}

@@ -74,6 +74,18 @@ def _print_summary(output: dict) -> None:
                 print(f"  Model latency: {llm_cache.get('modelLatencyMs')} ms")
             if llm_cache.get("outputTokenWarning"):
                 print(f"  Warning: {llm_cache.get('outputTokenWarning')}")
+        demo_llm = runtime.get("demoLlm", {})
+        if not isinstance(demo_llm, dict) or not demo_llm:
+            demo_llm = metrics.get("specialist_agents", {}).get("demoLlm", {})
+        if isinstance(demo_llm, dict) and demo_llm:
+            if demo_llm.get("providerCallsAttempted") is not None:
+                print(f"  Provider calls attempted: {demo_llm.get('providerCallsAttempted')}")
+            if demo_llm.get("confirmationsAccepted") is not None:
+                print(f"  LLM confirmations accepted: {demo_llm.get('confirmationsAccepted')}")
+            if demo_llm.get("fallbackUsed") is not None:
+                print(f"  Fallback used: {'yes' if demo_llm.get('fallbackUsed') else 'no'}")
+            if demo_llm.get("fallbackMessage"):
+                print(f"  {demo_llm.get('fallbackMessage')}")
         calls = runtime.get("providerCalls", [])
         if isinstance(cache, dict) and cache.get("hit"):
             print("  Model calls: 0")
@@ -114,9 +126,13 @@ def _print_summary(output: dict) -> None:
             or "none"
         )
     if len(verified) == 0:
-        demo_llm = metrics.get("specialist_agents", {}).get("demoLlm", {})
+        demo_llm = runtime.get("demoLlm", {})
+        if not isinstance(demo_llm, dict) or not demo_llm:
+            demo_llm = metrics.get("specialist_agents", {}).get("demoLlm", {})
         if isinstance(demo_llm, dict) and demo_llm.get("fallbackReason"):
             print(f"  Demo LLM: {demo_llm.get('fallbackReason')}")
+        if isinstance(demo_llm, dict) and demo_llm.get("fallbackMessage"):
+            print(f"  {demo_llm.get('fallbackMessage')}")
         if isinstance(demo_llm, dict) and demo_llm.get("mode") == "fallback":
             print(f"  Demo LLM fallback: {demo_llm.get('error', 'LLM unavailable')}")
         print_rejection_diagnostics(output)

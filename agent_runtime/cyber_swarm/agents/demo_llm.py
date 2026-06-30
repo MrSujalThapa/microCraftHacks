@@ -39,7 +39,12 @@ DEMO_FINDINGS_SYSTEM_PROMPT = (
     + "Demo task: confirm or reject deterministicCandidates using supplied evidence only. "
     + "Return short JSON with confirmations[] or reject_all=true. "
     + "Never invent file paths, lines, snippets, or evidence pack IDs. "
-    + "One sentence per string field. No markdown."
+    + "One sentence per string field (recommended_fix and suggested_regression_test included). "
+    + "No markdown. No prose outside JSON."
+)
+
+DEMO_LLM_FALLBACK_MESSAGE = (
+    "LLM returned no usable confirmation; preserved verifier-backed deterministic evidence."
 )
 
 
@@ -129,15 +134,19 @@ def run_demo_findings_with_provider(
             call_meta = cached.get("call")
             cache_meta["hit"] = True
 
+    provider_calls_attempted = 0
+
     if llm_payload is None:
-        llm_payload, call_meta, repair_attempted = _call_with_optional_repair(
-            provider,
-            user=user,
-            deterministic_candidates=deterministic_candidates,
-            runtime_config=runtime_config,
-            max_output_tokens=max_output_tokens,
-            scan_report=scan_report or {},
-            evidence_packs=evidence_packs,
+        llm_payload, call_meta, repair_attempted, provider_calls_attempted = (
+            _call_with_optional_repair(
+                provider,
+                user=user,
+                deterministic_candidates=deterministic_candidates,
+                runtime_config=runtime_config,
+                max_output_tokens=max_output_tokens,
+                scan_report=scan_report or {},
+                evidence_packs=evidence_packs,
+            )
         )
         cache_meta["hit"] = False
         cache_meta["outputTokens"] = (call_meta or {}).get("completion_tokens")
@@ -173,17 +182,24 @@ def run_demo_findings_with_provider(
         runtime_config=runtime_config,
     )
 
+    confirmations_accepted = len(drafts)
+    fallback_used = bool(deterministic_candidates) and confirmations_accepted == 0
+
     stage_metrics: dict[str, Any] = {
         "mode": runtime_config.provider,
         "purpose": "demo_findings",
         "call": call_meta,
         "llmCache": cache_meta,
         "draftCount": len(drafts),
+        "confirmationsAccepted": confirmations_accepted,
+        "providerCallsAttempted": provider_calls_attempted,
+        "fallbackUsed": fallback_used,
         "mergeIssues": merge_issues,
         "promptVersion": DEMO_PROMPT_VERSION,
         "repairAttempted": repair_attempted,
     }
-    if not drafts and deterministic_candidates:
+    if fallback_used:
+        stage_metrics["fallbackMessage"] = DEMO_LLM_FALLBACK_MESSAGE
         stage_metrics["fallbackReason"] = (
             "LLM produced candidates, but none were confirmed for verification"
         )
@@ -199,14 +215,16 @@ def _call_with_optional_repair(
     max_output_tokens: int,
     scan_report: dict[str, Any],
     evidence_packs: list,
-) -> tuple[dict[str, Any], dict[str, Any], bool]:
+) -> tuple[dict[str, Any], dict[str, Any], bool, int]:
     call_started = time.perf_counter()
+    provider_calls_attempted = 0
     result = provider.complete_json(
         system=DEMO_FINDINGS_SYSTEM_PROMPT,
         user=user,
         purpose="demo_findings",
         max_output_tokens=max_output_tokens,
     )
+    provider_calls_attempted += 1
     payload = result.payload
     call_meta = asdict(result)
     call_meta["elapsed_ms"] = round((time.perf_counter() - call_started) * 1000, 2)
@@ -217,7 +235,7 @@ def _call_with_optional_repair(
         runtime_config=runtime_config,
     )
     if drafts or payload.get("reject_all") is True or not deterministic_candidates:
-        return payload, call_meta, False
+        return payload, call_meta, False, provider_calls_attempted
 
     repair_user = json.dumps(
         {
@@ -239,6 +257,7 @@ def _call_with_optional_repair(
         purpose="demo_findings_repair",
         max_output_tokens=max_output_tokens,
     )
+    provider_calls_attempted += 1
     repair_meta = asdict(repair_result)
     repair_meta["elapsed_ms"] = round((time.perf_counter() - repair_started) * 1000, 2)
     call_meta["repair"] = repair_meta
@@ -246,7 +265,7 @@ def _call_with_optional_repair(
         repair_result.completion_tokens or 0
     )
     call_meta["elapsed_ms"] = round((time.perf_counter() - call_started) * 1000, 2)
-    return repair_result.payload, call_meta, True
+    return repair_result.payload, call_meta, True, provider_calls_attempted
 
 
 def merge_confirmations(

@@ -7,7 +7,10 @@ from dataclasses import asdict
 from typing import Any
 
 from cyber_swarm.agents.attack_planner import run_attack_planner
-from cyber_swarm.agents.demo_llm import run_demo_findings_with_provider
+from cyber_swarm.agents.demo_llm import (
+    DEMO_LLM_FALLBACK_MESSAGE,
+    run_demo_findings_with_provider,
+)
 from cyber_swarm.agents.model_stages import (
     run_attack_planner_with_provider,
     run_recon_with_provider,
@@ -277,7 +280,19 @@ def specialist_agents_node(state: GraphState) -> GraphState:
             )
             provider_metrics["demo_findings"] = llm_stage
         except Exception as error:  # noqa: BLE001
-            llm_stage = {"mode": "fallback", "error": str(error)}
+            demo_calls = [
+                call
+                for call in (provider.call_log() if provider is not None else [])
+                if str(call.get("purpose", "")).startswith("demo_findings")
+            ]
+            llm_stage = {
+                "mode": "fallback",
+                "error": str(error),
+                "providerCallsAttempted": len(demo_calls),
+                "confirmationsAccepted": 0,
+                "fallbackUsed": True,
+                "fallbackMessage": DEMO_LLM_FALLBACK_MESSAGE,
+            }
             provider_metrics["demo_findings"] = llm_stage
             # Keep deterministic drafts when LLM fails; secrets remain verifier-eligible.
             llm_drafts = []

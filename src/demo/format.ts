@@ -25,6 +25,10 @@ export interface RuntimeMetricsSummary {
   outputTokens?: number;
   modelLatencyMs?: number;
   stageTimings?: Record<string, number>;
+  providerCallsAttempted?: number;
+  confirmationsAccepted?: number;
+  fallbackUsed?: boolean;
+  fallbackMessage?: string;
 }
 
 export function printRuntimeMetrics(metrics: RuntimeMetricsSummary): void {
@@ -58,6 +62,18 @@ export function printRuntimeMetrics(metrics: RuntimeMetricsSummary): void {
   }
   if (metrics.modelLatencyMs != null) {
     printMetric("Model latency", `${metrics.modelLatencyMs} ms`);
+  }
+  if (metrics.providerCallsAttempted != null) {
+    printMetric("Provider calls attempted", metrics.providerCallsAttempted);
+  }
+  if (metrics.confirmationsAccepted != null) {
+    printMetric("LLM confirmations accepted", metrics.confirmationsAccepted);
+  }
+  if (metrics.fallbackUsed != null) {
+    printMetric("Fallback used", metrics.fallbackUsed ? "yes" : "no");
+  }
+  if (metrics.fallbackMessage) {
+    console.log(`  ${metrics.fallbackMessage}`);
   }
   if (metrics.cacheHit) {
     printMetric("Model calls", 0);

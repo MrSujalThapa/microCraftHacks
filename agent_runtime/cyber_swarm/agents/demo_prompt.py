@@ -12,7 +12,7 @@ from cyber_swarm.models.runtime_config import RuntimeConfig
 from cyber_swarm.rag.redaction import redact_secrets
 from cyber_swarm.verifier.demo_quality import is_public_route
 
-DEMO_PROMPT_VERSION = "demo-confirm-v2"
+DEMO_PROMPT_VERSION = "demo-confirm-v3"
 
 _LATENCY_CAPS: dict[str, dict[str, int]] = {
     "fastest": {
@@ -29,7 +29,7 @@ _LATENCY_CAPS: dict[str, dict[str, int]] = {
         "max_playbooks": 2,
         "max_findings": 1,
         "snippet_chars": 80,
-        "max_output_tokens": 700,
+        "max_output_tokens": 600,
     },
     "thorough": {
         "max_packs": 5,
@@ -52,21 +52,8 @@ def effective_max_confirmations(
     runtime_config: RuntimeConfig,
     candidates: list[AgentFindingDraft],
 ) -> int:
-    caps = latency_caps(runtime_config)
-    max_findings = caps["max_findings"]
-    if runtime_config.effective_latency != "balanced":
-        return max_findings
-
-    high_signal = [
-        draft
-        for draft in candidates
-        if draft.confidence == "high"
-        and draft.vulnerability_class in {"secret-exposure", "bola", "privilege-escalation"}
-    ]
-    distinct = {draft.vulnerability_class for draft in high_signal}
-    if len(distinct) >= 2 and len(high_signal) >= 2:
-        return min(2, caps.get("max_findings_thorough_cap", 2))
-    return 1
+    del candidates
+    return latency_caps(runtime_config)["max_findings"]
 
 
 def _pack_priority(pack: EvidencePack) -> tuple[int, str]:
