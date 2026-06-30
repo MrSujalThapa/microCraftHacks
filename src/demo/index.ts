@@ -9,8 +9,10 @@ import { deriveFindingsMarkdownPath, loadFindingsReport } from "../findings/load
 import { formatFindingsTable } from "../findings/display";
 import { filterDemoFindings, findBestDemoFinding } from "../findings/demoQuality";
 import { runScan } from "../scanner";
+import { findLatestScanReportForTarget } from "../scanner/reports";
 import { readScanReport, routeSkillsFromReport } from "../skills/router";
 import { writeDemoCommandsFile } from "./commands";
+import { DemoError } from "./errors";
 import { printMetric, printRuntimeMetrics, printSectionHeader } from "./format";
 
 const PACKAGE_RUNTIME_ROOT = join(__dirname, "..", "..", "agent_runtime");
@@ -35,6 +37,7 @@ export interface DemoRunResult {
   routedSkillsPath: string;
   demoCommandsPath: string;
   bestFindingId: string | null;
+  cacheHit?: boolean;
 }
 
 function summarizeRuntimeMetrics(
@@ -67,11 +70,26 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
   printMetric("Target repo", targetRoot);
   printMetric("Workspace", workspaceRoot);
 
-  printSectionHeader("1. Scan target");
-  const { reportPath: scanReportPath } = runScan(targetRoot, config, {
-    outputRoot: workspaceRoot,
-  });
-  printMetric("Scan report", scanReportPath);
+  printSectionHeader(options.fromCache ? "1. Reuse scan (from cache)" : "1. Scan target");
+  let scanReportPath: string;
+  if (options.fromCache) {
+    const cachedScan = findLatestScanReportForTarget(
+      resolve(workspaceRoot, config.outputDir),
+      targetRoot,
+    );
+    if (!cachedScan) {
+      throw new DemoError(
+        `No prior scan for ${targetRoot}. Run \`swarm demo ${formatDemoTargetArg(targetRoot, workspaceRoot)}\` without --from-cache first.`,
+      );
+    }
+    scanReportPath = cachedScan;
+    printMetric("Scan report (reused)", scanReportPath);
+  } else {
+    ({ reportPath: scanReportPath } = runScan(targetRoot, config, {
+      outputRoot: workspaceRoot,
+    }));
+    printMetric("Scan report", scanReportPath);
+  }
 
   printSectionHeader("2. Route playbooks");
   const routed = routeSkillsFromReport(workspaceRoot, config, scanReportPath);
@@ -128,6 +146,7 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
   const demoCommandsPath = writeDemoCommandsFile({
     findingsReportPath: agentResult.outputPath,
     scanReportPath,
+    targetRoot,
     bestFindingId: bestFinding?.id ?? null,
     reportsDir: resolve(workspaceRoot, config.outputDir),
   });
@@ -139,7 +158,7 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
     console.log(`  swarm explain ${bestFinding.id}`);
     console.log(`  swarm fix ${bestFinding.id}`);
   }
-  console.log(`  swarm demo ${targetRoot === workspaceRoot ? "." : targetRoot} --from-cache`);
+  console.log(`  swarm demo ${formatDemoTargetArg(targetRoot, workspaceRoot)} --from-cache`);
   printMetric("Command cheat sheet", demoCommandsPath);
 
   if (demoFindings.length === 0) {
@@ -155,5 +174,17 @@ export function runDemoCommand(options: DemoRunOptions = {}): DemoRunResult {
     routedSkillsPath: routed.outputPath,
     demoCommandsPath,
     bestFindingId: bestFinding?.id ?? null,
+    cacheHit: agentResult.runtimeMetrics?.cache?.hit,
   };
+}
+
+function formatDemoTargetArg(targetRoot: string, workspaceRoot: string): string {
+  if (normalizeRoot(targetRoot) === normalizeRoot(workspaceRoot)) {
+    return ".";
+  }
+  return targetRoot;
+}
+
+function normalizeRoot(path: string): string {
+  return resolve(path).replace(/\\/g, "/").toLowerCase();
 }

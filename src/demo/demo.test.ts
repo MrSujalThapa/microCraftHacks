@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../config/defaults";
 import { getConfigPath } from "../config/paths";
 import { getSkillsIndexPath } from "../skills/paths";
-import { runAgentRuntime } from "../agents/runtime";
 import { buildDemoCommandsText, writeDemoCommandsFile } from "./commands";
 import { runDemoCommand } from "./index";
 import { findBestDemoFinding } from "../findings/demoQuality";
@@ -47,6 +46,7 @@ describe("buildDemoCommandsText", () => {
     const text = buildDemoCommandsText({
       findingsReportPath: ".swarm/reports/scan-findings.json",
       scanReportPath: ".swarm/reports/scan.json",
+      targetRoot: "C:/Users/demo/wattif",
       bestFindingId: "verified-secret-1",
       reportsDir: ".swarm/reports",
     });
@@ -55,6 +55,7 @@ describe("buildDemoCommandsText", () => {
     expect(text).toContain("swarm findings --best");
     expect(text).toContain("swarm explain verified-secret-1");
     expect(text).toContain("swarm fix verified-secret-1");
+    expect(text).toContain("swarm demo C:/Users/demo/wattif --from-cache");
     expect(text).toContain("--from-cache");
   });
 });
@@ -148,7 +149,7 @@ describe("runDemoCommand", () => {
     }
   });
 
-  it("from-cache demo replay does not call the model", () => {
+  it("from-cache demo replay reuses prior scan and does not call the model", () => {
     const repoRoot = join(__dirname, "..", "..");
     const root = makeTempRoot();
     writeWorkspace(root);
@@ -156,20 +157,11 @@ describe("runDemoCommand", () => {
     const previousCwd = process.cwd();
     process.chdir(root);
     try {
-      runDemoCommand({ provider: "mock" });
+      const first = runDemoCommand({ provider: "mock" });
+      const replay = runDemoCommand({ provider: "mock", fromCache: true });
 
-      const replay = runAgentRuntime({
-        root,
-        reportPath: join(root, ".swarm", "reports", readLatestScanReport(root)),
-        routedSkillsPath: join(root, ".swarm", "cache", "routed-skills.json"),
-        runtimeRoot: join(repoRoot, "agent_runtime"),
-        provider: "mock",
-        mode: "demo",
-        fromCache: true,
-      });
-
-      expect(replay.runtimeMetrics?.cache?.hit).toBe(true);
-      expect(replay.runtimeMetrics?.providerCalls ?? []).toHaveLength(0);
+      expect(replay.scanReportPath).toBe(first.scanReportPath);
+      expect(replay.cacheHit).toBe(true);
     } finally {
       process.chdir(previousCwd);
     }
@@ -185,6 +177,7 @@ describe("writeDemoCommandsFile", () => {
     const path = writeDemoCommandsFile({
       findingsReportPath: join(reportsDir, "scan-findings.json"),
       scanReportPath: join(reportsDir, "scan.json"),
+      targetRoot: join(root, "backend"),
       bestFindingId: "verified-draft-h1",
       reportsDir,
     });
@@ -194,12 +187,3 @@ describe("writeDemoCommandsFile", () => {
     expect(containsRawSecret(readFileSync(path, "utf8"))).toBe(false);
   });
 });
-
-function readLatestScanReport(root: string): string {
-  const reportsDir = join(root, ".swarm", "reports");
-  const files = readdirSync(reportsDir).filter(
-    (name) => name.startsWith("scan-") && name.endsWith(".json") && !name.includes("-findings"),
-  );
-  files.sort();
-  return files.at(-1)!;
-}

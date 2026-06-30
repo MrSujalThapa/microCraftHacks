@@ -6,6 +6,7 @@ export const DEMO_COMMANDS_FILENAME = "latest-demo-commands.txt";
 export interface DemoCommandsInput {
   findingsReportPath: string;
   scanReportPath: string;
+  targetRoot: string;
   bestFindingId: string | null;
   reportsDir: string;
 }
@@ -31,8 +32,8 @@ export function buildDemoCommandsText(input: DemoCommandsInput): string {
   lines.push(
     "",
     "# Instant replay (no model calls):",
-    `swarm demo ${input.scanReportPath.replace(/\\/g, "/")} --from-cache`,
-    `swarm agents run --report ${input.scanReportPath} --from-cache --mode demo`,
+    `swarm demo ${input.targetRoot.replace(/\\/g, "/")} --from-cache`,
+    `swarm agents run --report ${input.scanReportPath.replace(/\\/g, "/")} --from-cache --mode demo`,
   );
 
   return `${lines.join("\n")}\n`;

@@ -1,6 +1,7 @@
 import { ConfigError } from "../config/errors";
 import { ProviderError } from "../config/provider-errors";
 import { AgentRuntimeError } from "../agents/runtime";
+import { DemoError } from "../demo/errors";
 import { FindingsError } from "../findings/errors";
 import { SkillsError } from "../skills/errors";
 
@@ -34,6 +35,11 @@ export function printCliError(error: unknown): void {
   }
 
   if (error instanceof FindingsError) {
+    console.error(`Error: ${error.message}`);
+    return;
+  }
+
+  if (error instanceof DemoError) {
     console.error(`Error: ${error.message}`);
     return;
   }
