@@ -9,6 +9,7 @@ import { loadConfig } from "../config/load";
 import { getConfigPath } from "../config/paths";
 import { getDoctorConfigStatus } from "../config/status";
 import type { SwarmConfig, SwarmProvider } from "../config/types";
+import { containsRawSecret } from "../shared/redaction";
 import { buildSkillsIndex } from "../skills/indexer";
 import { syncSkills } from "../skills/sync";
 import { printCliError } from "./errors";
@@ -68,10 +69,24 @@ interface SecretOutput {
 
 function parseProvider(value: string): SwarmProvider {
   const normalized = value.trim().toLowerCase();
+  if (containsRawSecret(value)) {
+    throw new Error("Provider value looks like a secret. Press Enter for openai; the API key prompt comes later.");
+  }
   if (PROVIDERS.has(normalized as SwarmProvider)) {
     return normalized as SwarmProvider;
   }
-  throw new Error(`Invalid provider "${value}". Expected one of: openai, mock, local`);
+  throw new Error("Invalid provider. Expected one of: openai, mock, local");
+}
+
+function normalizeModel(value: string): string {
+  const model = value.trim();
+  if (containsRawSecret(model)) {
+    throw new Error("Model value looks like a secret. The API key prompt comes later.");
+  }
+  if (!model) {
+    return DEFAULT_MODEL;
+  }
+  return model;
 }
 
 export function maskApiKey(key: string): string {
@@ -185,7 +200,7 @@ function createTerminalPrompter(): SetupPrompter {
 
   return {
     async text(question: string, defaultValue: string): Promise<string> {
-      const answer = await askText(`${question} (${defaultValue}): `);
+      const answer = await askText(`${question} [default: ${defaultValue}]: `);
       return answer.trim() || defaultValue;
     },
     async confirm(question: string, defaultValue: boolean): Promise<boolean> {
@@ -245,16 +260,15 @@ export async function runSetup(
   const existingConfig = loadConfig(root);
   const providerInput =
     options.provider ??
-    (prompt ? await prompter.text("Provider", existingConfig.provider || DEFAULT_PROVIDER) : undefined) ??
     existingConfig.provider ??
     DEFAULT_PROVIDER;
   const provider = parseProvider(providerInput);
 
-  const model =
+  const modelInput =
     options.model ??
-    (prompt ? await prompter.text("Model", existingConfig.model || DEFAULT_MODEL) : undefined) ??
     existingConfig.model ??
     DEFAULT_MODEL;
+  const model = normalizeModel(modelInput);
 
   const config: SwarmConfig = {
     ...existingConfig,
@@ -277,7 +291,7 @@ export async function runSetup(
     } else if (existingKey) {
       log(`OpenAI API key already found: ${maskApiKey(existingKey)}`);
     } else if (prompt) {
-      const apiKey = await prompter.secret("OpenAI API key");
+      const apiKey = await prompter.secret("OpenAI API key (input hidden)");
       if (!apiKey) {
         throw new Error("OPENAI_API_KEY is required for the openai provider.");
       }

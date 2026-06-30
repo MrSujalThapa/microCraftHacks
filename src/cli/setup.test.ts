@@ -66,8 +66,8 @@ function fakeIndex(root: string, config: SwarmConfig) {
 
 function interactivePrompter(apiKey: string): SetupPrompter {
   return {
-    async text(_question: string, defaultValue: string): Promise<string> {
-      return defaultValue;
+    async text(): Promise<string> {
+      throw new Error("visible text prompt should not run");
     },
     async secret(): Promise<string> {
       return apiKey;
@@ -165,6 +165,29 @@ describe("runSetup", () => {
     expect(outputLines.join("\n")).toContain("OpenAI API key saved: sk-...1234");
   });
 
+  it("interactive setup uses provider/model defaults before hidden key entry", async () => {
+    const root = makeTempRoot();
+    const apiKey = "sk-default-flow-secret-1234";
+
+    await runSetup(
+      {
+        skipSkillsSync: true,
+        skipSkillsIndex: true,
+      },
+      root,
+      {
+        prompter: interactivePrompter(apiKey),
+        log: () => undefined,
+      },
+    );
+
+    expect(loadConfig(root)).toMatchObject({
+      provider: "openai",
+      model: "gpt-5-mini",
+    });
+    expect(readFileSync(join(root, ".env"), "utf8")).toContain(`OPENAI_API_KEY=${apiKey}`);
+  });
+
   it("masked prompt handles an existing key by showing only the masked key", async () => {
     const root = makeTempRoot();
     const lines: string[] = [];
@@ -186,6 +209,60 @@ describe("runSetup", () => {
     const output = lines.join("\n");
     expect(output).toContain("OpenAI API key already found: sk-...abcd");
     expect(output).not.toContain(apiKey);
+  });
+
+  it("does not echo a key accidentally entered as provider", async () => {
+    const root = makeTempRoot();
+    const pastedKey = "sk-1234567890provider";
+
+    await expect(
+      runSetup(
+        {
+          provider: pastedKey,
+          model: "gpt-5-mini",
+          skipSkillsSync: true,
+          skipSkillsIndex: true,
+          yes: true,
+        },
+        root,
+        { prompter: throwingPrompter(), log: () => undefined },
+      ),
+    ).rejects.toThrow("Provider value looks like a secret");
+
+    await expect(
+      runSetup(
+        {
+          provider: pastedKey,
+          model: "gpt-5-mini",
+          skipSkillsSync: true,
+          skipSkillsIndex: true,
+          yes: true,
+        },
+        root,
+        { prompter: throwingPrompter(), log: () => undefined },
+      ),
+    ).rejects.not.toThrow(pastedKey);
+  });
+
+  it("does not save or echo a key accidentally entered as model", async () => {
+    const root = makeTempRoot();
+    const pastedKey = "sk-1234567890model";
+
+    await expect(
+      runSetup(
+        {
+          provider: "openai",
+          model: pastedKey,
+          skipSkillsSync: true,
+          skipSkillsIndex: true,
+          yes: true,
+        },
+        root,
+        { prompter: throwingPrompter(), log: () => undefined },
+      ),
+    ).rejects.toThrow("Model value looks like a secret");
+
+    expect(readFileSync(getConfigPath(root), "utf8")).not.toContain(pastedKey);
   });
 
   it("preserves existing .env lines", async () => {
