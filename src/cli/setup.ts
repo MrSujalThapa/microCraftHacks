@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
+import { emitKeypressEvents } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { resolve } from "node:path";
 
@@ -20,6 +21,9 @@ const PROVIDERS = new Set<SwarmProvider>(["openai", "mock", "local"]);
 
 const NON_TTY_SECRET_ERROR =
   "Interactive API key entry requires a TTY so the key can stay hidden. Set OPENAI_API_KEY in .env, or use --api-key only for automation.";
+
+const RAW_MODE_SECRET_ERROR =
+  "This terminal cannot enable hidden API key input. Set OPENAI_API_KEY in .env, or use --api-key only for automation.";
 
 export interface SetupOptions {
   provider?: string;
@@ -51,13 +55,12 @@ interface SecretInput {
   setRawMode?: (mode: boolean) => unknown;
   resume: () => unknown;
   pause: () => unknown;
-  setEncoding: (encoding: BufferEncoding) => unknown;
   on: {
-    (event: "data", listener: (chunk: Buffer | string) => void): unknown;
+    (event: "keypress", listener: (text: string, key: KeypressInfo) => void): unknown;
     (event: "error", listener: (error: Error) => void): unknown;
   };
   off: {
-    (event: "data", listener: (chunk: Buffer | string) => void): unknown;
+    (event: "keypress", listener: (text: string, key: KeypressInfo) => void): unknown;
     (event: "error", listener: (error: Error) => void): unknown;
   };
 }
@@ -65,6 +68,12 @@ interface SecretInput {
 interface SecretOutput {
   isTTY?: boolean;
   write: (chunk: string) => unknown;
+}
+
+interface KeypressInfo {
+  name?: string;
+  ctrl?: boolean;
+  sequence?: string;
 }
 
 function parseProvider(value: string): SwarmProvider {
@@ -121,23 +130,23 @@ export async function readMaskedInput(
 
   const setRawMode = secretInput.setRawMode;
   const wasRaw = typeof secretInput.isRaw === "boolean" ? secretInput.isRaw : false;
-  const previousEncoding = secretInput.readableEncoding;
+  let rawModeEnabled = false;
 
   return await new Promise<string>((resolveSecret, rejectSecret) => {
     let value = "";
     let settled = false;
 
     const cleanup = () => {
-      secretInput.off("data", onData);
+      secretInput.off("keypress", onKeypress);
       secretInput.off("error", onError);
-      try {
-        setRawMode(wasRaw);
-      } finally {
-        if (previousEncoding) {
-          secretInput.setEncoding(previousEncoding);
+      if (rawModeEnabled) {
+        try {
+          setRawMode(wasRaw);
+        } catch {
+          /* terminal is already leaving setup; keep original error/result */
         }
-        secretInput.pause();
       }
+      secretInput.pause();
     };
 
     const finish = (error?: Error) => {
@@ -158,33 +167,37 @@ export async function readMaskedInput(
       finish(error);
     };
 
-    const onData = (chunk: Buffer | string) => {
-      const text = chunk.toString("utf8");
-      for (const char of text) {
-        if (char === "\r" || char === "\n") {
-          finish();
-          return;
-        }
-        if (char === "\u0003") {
-          finish(new Error("Setup cancelled."));
-          return;
-        }
-        if (char === "\b" || char === "\u007f") {
-          value = value.slice(0, -1);
-          continue;
-        }
-        if (char >= " ") {
-          value += char;
-        }
+    const onKeypress = (text: string, key: KeypressInfo) => {
+      if (key.ctrl && key.name === "c") {
+        finish(new Error("Setup cancelled."));
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        finish();
+        return;
+      }
+      if (key.name === "backspace") {
+        value = value.slice(0, -1);
+        return;
+      }
+      if (text && text >= " " && !key.ctrl) {
+        value += text;
       }
     };
 
     secretOutput.write(`${question}: `);
-    setRawMode(true);
-    secretInput.resume();
-    secretInput.setEncoding("utf8");
-    secretInput.on("data", onData);
-    secretInput.on("error", onError);
+    try {
+      emitKeypressEvents(secretInput as NodeJS.ReadableStream);
+      secretInput.resume();
+      setRawMode(true);
+      rawModeEnabled = true;
+      secretInput.on("keypress", onKeypress);
+      secretInput.on("error", onError);
+    } catch {
+      cleanup();
+      secretOutput.write("\n");
+      rejectSecret(new Error(RAW_MODE_SECRET_ERROR));
+    }
   });
 }
 

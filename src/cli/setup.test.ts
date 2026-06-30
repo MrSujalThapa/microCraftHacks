@@ -393,13 +393,16 @@ describe("runSetup", () => {
 });
 
 describe("readMaskedInput", () => {
+  it("does not use private stdin handle fields", () => {
+    const privateField = `_${"handle"}`;
+    expect(readFileSync(join(__dirname, "setup.ts"), "utf8")).not.toContain(privateField);
+  });
+
   it("does not echo raw typed characters and restores raw mode", async () => {
     const input = new EventEmitter() as EventEmitter & {
       isTTY: boolean;
       isRaw: boolean;
-      readableEncoding: BufferEncoding | null;
       setRawMode: (mode: boolean) => void;
-      setEncoding: (encoding: BufferEncoding) => void;
       resume: () => void;
       pause: () => void;
     };
@@ -415,20 +418,16 @@ describe("readMaskedInput", () => {
 
     input.isTTY = true;
     input.isRaw = false;
-    input.readableEncoding = null;
     input.setRawMode = (mode: boolean) => {
       rawModes.push(mode);
       input.isRaw = mode;
-    };
-    input.setEncoding = (encoding: BufferEncoding) => {
-      input.readableEncoding = encoding;
     };
     input.resume = () => undefined;
     input.pause = () => undefined;
 
     const promise = readMaskedInput(input, output as never, "OpenAI API key");
-    input.emit("data", "sk-visible-secret-1234");
-    input.emit("data", "\r");
+    input.emit("keypress", "sk-visible-secret-1234", {});
+    input.emit("keypress", "\r", { name: "return" });
 
     await expect(promise).resolves.toBe("sk-visible-secret-1234");
     expect(writes.join("")).toBe("OpenAI API key: \n");
@@ -440,9 +439,7 @@ describe("readMaskedInput", () => {
     const input = new EventEmitter() as EventEmitter & {
       isTTY: boolean;
       isRaw: boolean;
-      readableEncoding: BufferEncoding | null;
       setRawMode: (mode: boolean) => void;
-      setEncoding: (encoding: BufferEncoding) => void;
       resume: () => void;
       pause: () => void;
     };
@@ -455,21 +452,89 @@ describe("readMaskedInput", () => {
 
     input.isTTY = true;
     input.isRaw = false;
-    input.readableEncoding = null;
     input.setRawMode = (mode: boolean) => {
       input.isRaw = mode;
-    };
-    input.setEncoding = (encoding: BufferEncoding) => {
-      input.readableEncoding = encoding;
     };
     input.resume = () => undefined;
     input.pause = () => undefined;
 
     const promise = readMaskedInput(input, output as never, "OpenAI API key");
-    input.emit("data", "sk-old");
-    input.emit("data", "\u007f\u007f\u007fnew\r");
+    input.emit("keypress", "sk-old", {});
+    input.emit("keypress", "", { name: "backspace" });
+    input.emit("keypress", "", { name: "backspace" });
+    input.emit("keypress", "", { name: "backspace" });
+    input.emit("keypress", "new", {});
+    input.emit("keypress", "\r", { name: "return" });
 
     await expect(promise).resolves.toBe("sk-new");
     expect(input.isRaw).toBe(false);
+  });
+
+  it("restores raw mode and rejects safely on Ctrl+C", async () => {
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      setRawMode: (mode: boolean) => void;
+      resume: () => void;
+      pause: () => void;
+    };
+    const rawModes: boolean[] = [];
+    let paused = false;
+    const output = {
+      isTTY: true,
+      write() {
+        return true;
+      },
+    };
+
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      rawModes.push(mode);
+      input.isRaw = mode;
+    };
+    input.resume = () => undefined;
+    input.pause = () => {
+      paused = true;
+    };
+
+    const promise = readMaskedInput(input, output as never, "OpenAI API key");
+    input.emit("keypress", "\u0003", { name: "c", ctrl: true });
+
+    await expect(promise).rejects.toThrow("Setup cancelled");
+    expect(rawModes).toEqual([true, false]);
+    expect(paused).toBe(true);
+  });
+
+  it("converts raw mode failures into a clear setup error", async () => {
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      setRawMode: (mode: boolean) => void;
+      resume: () => void;
+      pause: () => void;
+    };
+    let paused = false;
+    const output = {
+      isTTY: true,
+      write() {
+        return true;
+      },
+    };
+
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = () => {
+      throw new Error("Cannot read properties of undefined");
+    };
+    input.resume = () => undefined;
+    input.pause = () => {
+      paused = true;
+    };
+
+    await expect(readMaskedInput(input, output as never, "OpenAI API key")).rejects.toThrow(
+      "This terminal cannot enable hidden API key input",
+    );
+    expect(paused).toBe(true);
   });
 });
