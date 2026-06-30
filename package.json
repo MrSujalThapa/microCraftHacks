@@ -3,17 +3,42 @@
   "version": "0.1.0",
   "description": "CLI-first autonomous security swarm for authorized pre-production testing",
   "license": "MIT",
+  "author": "MrSujalThapa",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MrSujalThapa/microCraftHacks.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MrSujalThapa/microCraftHacks/issues"
+  },
+  "homepage": "https://github.com/MrSujalThapa/microCraftHacks#readme",
+  "keywords": [
+    "security",
+    "cli",
+    "swarm",
+    "static-analysis",
+    "pre-production",
+    "authorized-testing"
+  ],
   "bin": {
     "swarm": "./dist/cli/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "agent_runtime/cyber_swarm",
+    "agent_runtime/pyproject.toml",
+    "README.md",
+    "LICENSE",
+    ".env.example"
   ],
   "scripts": {
     "dev": "tsx src/cli/index.ts",
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
+    "prepack": "npm run build && node scripts/clean-agent-runtime.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "pack:check": "node scripts/validate-pack.mjs",
+    "pack:dry-run": "npm pack --dry-run"
   },
   "engines": {
     "node": ">=20"

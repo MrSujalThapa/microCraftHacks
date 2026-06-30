@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -54,6 +54,17 @@ describe("findLatestScanReportForTarget", () => {
         2,
       )}\n`,
       "utf8",
+    );
+
+    utimesSync(
+      join(reportsDir, "scan-2026-06-29T12-00-00-000Z.json"),
+      new Date("2026-06-29T12:00:00.000Z"),
+      new Date("2026-06-29T12:00:00.000Z"),
+    );
+    utimesSync(
+      join(reportsDir, "scan-2026-06-30T00-00-00-000Z.json"),
+      new Date("2026-06-30T00:00:00.000Z"),
+      new Date("2026-06-30T00:00:00.000Z"),
     );
 
     const latest = findLatestScanReportForTarget(reportsDir, target);

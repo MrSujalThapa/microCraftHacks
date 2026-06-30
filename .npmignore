@@ -1,0 +1,42 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Local workspace artifacts
+.swarm/
+reports/
+
+# External skill repos (cloned locally via swarm skills sync)
+skills/
+
+# Dev docs and agent instructions
+docs/
+AGENTS.md
+agents.md
+
+# TypeScript sources and tests
+src/
+coverage/
+*.test.ts
+
+# Python dev artifacts
+agent_runtime/tests/
+agent_runtime/.pytest_cache/
+agent_runtime/**/__pycache__/**
+agent_runtime/**/*.pyc
+agent_runtime/**/*.egg-info/
+
+# Repo metadata
+.git/
+.github/
+.gitignore
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Dependencies (dev-only in repo root)
+node_modules/
