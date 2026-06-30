@@ -9,6 +9,7 @@ import { runScanCommand } from "./scan";
 import { runAgentsRunCommand } from "./agents";
 import { runDemoCliCommand } from "./demo";
 import { runFindingsExplainCommand, runFindingsFixCommand, runFindingsListCommand } from "./findings";
+import { runSetupCommand } from "./setup";
 import { runSkillsCommand, runSkillsIndexCommand, runSkillsListCommand, runSkillsRouteCommand, runSkillsSyncCommand } from "./skills";
 import { getPackageVersion } from "../shared/version";
 
@@ -30,6 +31,26 @@ program
   .command("init")
   .description("Create default .swarm/config.json and project folders")
   .action(runInit);
+
+program
+  .command("setup")
+  .description("Run first-run onboarding for config, provider, skills, and doctor checks")
+  .option("--provider <name>", "Model provider: openai, mock, or local")
+  .option("--model <name>", "Model name when using an LLM provider")
+  .option("--api-key <key>", "OpenAI API key to save locally")
+  .option("--skip-skills-sync", "Do not sync the external skills repo")
+  .option("--skip-skills-index", "Do not build the skills index")
+  .option("--yes", "Accept defaults and run non-interactively")
+  .action(
+    (options: {
+      provider?: string;
+      model?: string;
+      apiKey?: string;
+      skipSkillsSync?: boolean;
+      skipSkillsIndex?: boolean;
+      yes?: boolean;
+    }) => runSetupCommand(options),
+  );
 
 program.command("doctor").description("Check local environment and project layout").action(runDoctor);
 
@@ -171,4 +192,7 @@ program
     runFindingsFixCommand(findingId, options);
   });
 
-program.parse(process.argv);
+program.parseAsync(process.argv).catch((error: unknown) => {
+  printCliError(error);
+  process.exitCode = 1;
+});

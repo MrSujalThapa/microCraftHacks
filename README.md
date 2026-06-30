@@ -25,7 +25,7 @@ Verify the CLI:
 ```bash
 swarm --help
 swarm doctor
-swarm init
+swarm setup
 ```
 
 Run a cached demo replay (no model calls) against the current directory:
@@ -51,7 +51,11 @@ When published to npm:
 
 ```bash
 npm install -g cyber-swarm
-swarm --help
+mkdir swarm-test
+cd swarm-test
+swarm setup
+swarm doctor
+swarm demo <target>
 ```
 
 ## Environment variables
@@ -64,7 +68,7 @@ Copy `.env.example` to `.env` in your **target project** (never commit `.env`):
 | `SWARM_PROVIDER` | Override provider (`openai`, `mock`, `local`) |
 | `SWARM_MODEL` | Override model (default `gpt-5-mini`) |
 
-Provider and model can also be set in `.swarm/config.json` after `swarm init`.
+Provider and model can also be set in `.swarm/config.json` after `swarm setup` or `swarm init`.
 
 Install Python runtime dependencies once:
 
@@ -75,9 +79,11 @@ pip install -e agent_runtime
 ## Quick start
 
 ```bash
-swarm init
-swarm skills sync
-swarm skills index
+npm install -g cyber-swarm
+mkdir swarm-test
+cd swarm-test
+swarm setup
+swarm doctor
 swarm scan .
 swarm demo .              # full demo (uses provider)
 swarm demo . --from-cache # replay cached findings, no model calls
